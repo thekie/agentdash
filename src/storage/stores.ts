@@ -75,7 +75,7 @@ export function assertStoreLive(store: StoreRow): void {
   if (store.archivedAt !== null) {
     throw new StorageError(
       "archived",
-      `Data Store ${store.id} ("${store.name}") is Archived; restore it first`,
+      `Data Store ${store.id} ("${store.name}") is Archived. Restore it first.`,
     );
   }
 }
@@ -350,7 +350,7 @@ function retypeColumn(draft: Draft, key: string, to: ParsedColumnType, path: Pat
 function archiveColumn(draft: Draft, key: string, path: Path): void {
   const column = liveColumn(draft, key, path);
   if (draft.store.key.includes(column.physical)) {
-    throw new StorageError("invalid", `Column "${key}" is part of the Key; change the Key first`, {
+    throw new StorageError("invalid", `Column "${key}" is part of the Key. Change the Key first.`, {
       issues: [{ path, problem: "column is in the Key" }],
     });
   }

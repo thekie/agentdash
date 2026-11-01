@@ -6,7 +6,7 @@ import { test as base, expect } from "vitest";
 import { createApp, serverInfo } from "./app.ts";
 
 const test = base.extend<{ app: ReturnType<typeof createApp>["app"] }>({
-  // biome-ignore lint/correctness/noEmptyPattern: Vitest fixtures require object destructuring
+  // biome-ignore lint/correctness/noEmptyPattern: A Vitest fixture must destructure its first argument.
   app: async ({}, use) => {
     const webRoot = mkdtempSync(join(tmpdir(), "agentdash-web-"));
     writeFileSync(join(webRoot, "index.html"), "<h1>agentdash</h1>");

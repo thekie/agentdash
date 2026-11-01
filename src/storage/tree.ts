@@ -170,7 +170,7 @@ function assertNotArchived(archived: Archived | undefined): void {
   const name = archived.row.title === null ? "" : ` ("${archived.row.title}")`;
   throw new StorageError(
     "archived",
-    `${archived.kind} ${archived.row.id}${name} is Archived; restore it first`,
+    `${archived.kind} ${archived.row.id}${name} is Archived. Restore it first.`,
   );
 }
 

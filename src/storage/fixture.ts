@@ -7,7 +7,7 @@ import { createStorage, type Storage } from "./storage.ts";
  * test.
  */
 export const test = base.extend<{ storage: Storage }>({
-  // biome-ignore lint/correctness/noEmptyPattern: Vitest fixtures require object destructuring
+  // biome-ignore lint/correctness/noEmptyPattern: A Vitest fixture must destructure its first argument.
   storage: async ({}, use) => {
     const storage = createStorage(":memory:");
     await use(storage);

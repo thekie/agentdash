@@ -19,7 +19,9 @@ export function createApp(webRoot: string) {
   app.all("/mcp", (c) => mcp.fetch(c.req.raw));
   app.use("/*", serveStatic({ root: webRoot }));
   const indexHtml = serveStatic({ path: join(webRoot, "index.html") });
-  // A path with a file extension is a missing asset and gets a 404. Only a client-side route gets `index.html`.
+  // `serveStatic` above already served every file that exists. A path with a file extension that
+  // reaches this point is a missing asset, so it gets a 404. Only a client-side route gets
+  // `index.html`.
   app.use("*", async (c, next) => (extname(c.req.path) ? c.notFound() : indexHtml(c, next)));
   return { app, close: mcp.close };
 }

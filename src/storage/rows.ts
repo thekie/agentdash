@@ -254,7 +254,7 @@ export function updateRows(
   return updates.map((update, index) => {
     const before = rowAtVersion(db, store, update.id, update.expectedVersion);
     if (before.archivedAt !== null) {
-      throw new StorageError("archived", `Row ${update.id} is Archived; restore it first`);
+      throw new StorageError("archived", `Row ${update.id} is Archived. Restore it first.`);
     }
     writeValues(db, store, update.id, update.stored, now);
     const record = { ...before, ...Object.fromEntries(update.stored) };

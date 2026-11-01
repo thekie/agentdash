@@ -6,7 +6,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      // main.test.ts runs main.ts in a child process, which coverage cannot see.
+      // `main.test.ts` runs `main.ts` in a child process, and coverage does not see a child process.
       exclude: ["src/**/*.test.ts", "src/main.ts"],
       thresholds: { lines: 80, branches: 80, functions: 80, statements: 80 },
     },
