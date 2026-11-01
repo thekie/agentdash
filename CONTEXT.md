@@ -9,7 +9,7 @@ The single human who installs agentdash, connects agents to it, and reads the da
 _Avoid_: user, admin
 
 **Agent**:
-An external AI client (Claude Code, Claude Desktop, any MCP client) connected to agentdash with its own token. Agents are the only writers.
+An external AI client (Claude Code, Claude Desktop, any MCP client) connected to agentdash on the Owner's machine. Agents are the only writers and are not told apart: agentdash does not know which Agent made a change.
 _Avoid_: bot, integration
 
 ### Structure
@@ -39,6 +39,10 @@ _Avoid_: series, dataset, collection
 A Widget's declarative description of which Data Stores it reads and how it filters, joins, groups, and aggregates them into the slots the Widget draws.
 _Avoid_: query, mapping, view
 
+**Slot**:
+A named input a Widget type draws, such as `x`, `y`, `value` or `target`. A Projection fills each Slot with a column.
+_Avoid_: field, channel, binding
+
 **Archive**:
 Removing a Dashboard, Widget, or Data Store from view without destroying it. Agents never delete permanently.
 _Avoid_: delete, trash
@@ -48,5 +52,4 @@ _Avoid_: delete, trash
 - A **Dashboard** holds ordered **Widgets** and ordered child **Dashboards**
 - A **Widget** may hold ordered child **Widgets**
 - A data **Widget** reads one or more **Data Stores** through its **Projection**; static Widgets hold their content inline
-- Every **Dashboard**, **Widget**, and **Data Store** records which **Agent** last changed it
 - Any **Agent** may change anything; there is no per-Agent ownership
