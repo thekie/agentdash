@@ -21,7 +21,7 @@ test("appended rows read back in the Agent's value forms", ({ storage }) => {
     store: "budget",
     rows: [{ month: "2026-01-01", category: "rent", amount: 950.5, paid: true }],
   });
-  expect(storage.listRows("budget")).toMatchObject([
+  expect(storage.rows("budget")).toMatchObject([
     {
       id: 1,
       version: 1,
@@ -44,7 +44,7 @@ test("bad values fail with invalid listing every bad row, and nothing is written
     ["rows", 1, "amount"],
     ["rows", 2, "colour"],
   ]);
-  expect(storage.listRows("budget")).toEqual([]);
+  expect(storage.rows("budget")).toEqual([]);
 });
 
 test("more than 1,000 rows in one append is invalid", ({ storage }) => {
@@ -74,7 +74,7 @@ test("appending a row whose Key exists fails with conflict by default, returning
   expect(failure.details.current).toMatchObject([
     { index: 1, row: { id: 1, values: { amount: 900 } } },
   ]);
-  expect(storage.listRows("budget")).toHaveLength(1);
+  expect(storage.rows("budget")).toHaveLength(1);
 });
 
 test("onConflict update re-syncs matching rows, so repeating the append changes nothing", ({
@@ -92,7 +92,7 @@ test("onConflict update re-syncs matching rows, so repeating the append changes 
   };
   expect(storage.appendRows(sync)).toEqual({ inserted: [], updated: [1], skipped: [] });
   storage.appendRows(sync);
-  expect(storage.listRows("budget").map((r) => r.values.amount)).toEqual([950]);
+  expect(storage.rows("budget").map((r) => r.values.amount)).toEqual([950]);
 });
 
 test("onConflict skip keeps matching rows and appends the rest", ({ storage }) => {
@@ -110,7 +110,7 @@ test("onConflict skip keeps matching rows and appends the rest", ({ storage }) =
     ],
   });
   expect(result).toEqual({ inserted: [2], updated: [], skipped: [1] });
-  expect(storage.listRows("budget").map((r) => r.values.amount)).toEqual([900, 300]);
+  expect(storage.rows("budget").map((r) => r.values.amount)).toEqual([900, 300]);
 });
 
 test("updating a row changes only the given values and bumps its version", ({ storage }) => {
@@ -173,8 +173,8 @@ test("an Archived row is no longer listed and frees its Key", ({ storage }) => {
     store: "budget",
     rows: [{ month: "2026-01-01", category: "rent", amount: 950 }],
   });
-  expect(storage.listRows("budget").map((r) => r.id)).toEqual([2]);
-  expect(storage.listRows("budget", { archived: true }).map((r) => r.id)).toEqual([1]);
+  expect(storage.rows("budget").map((r) => r.id)).toEqual([2]);
+  expect(storage.archivedRows("budget").map((r) => r.id)).toEqual([1]);
 });
 
 test("restoring a row whose Key a live row took fails with conflict", ({ storage }) => {
@@ -192,4 +192,26 @@ test("an unknown row is not_found", ({ storage }) => {
   expect(
     failureOf(() => storage.archiveRow({ store: "budget", id: 9, expectedVersion: 1 })).code,
   ).toBe("not_found");
+});
+
+test("an Archived row cannot be updated", ({ storage }) => {
+  createBudget(storage);
+  storage.appendRows({ store: "budget", rows: [{ month: "2026-01-01", amount: 900 }] });
+  storage.archiveRow({ store: "budget", id: 1, expectedVersion: 1 });
+  const failure = failureOf(() =>
+    storage.updateRows({
+      store: "budget",
+      rows: [{ id: 1, expectedVersion: 2, values: { amount: 1 } }],
+    }),
+  );
+  expect(failure.code).toBe("archived");
+});
+
+test("two rows of one append sharing a Key fail with conflict naming the earlier row", ({
+  storage,
+}) => {
+  createBudget(storage);
+  const row = { month: "2026-01-01", category: "rent" };
+  const failure = failureOf(() => storage.appendRows({ store: "budget", rows: [row, row] }));
+  expect(failure.details.current).toEqual([{ index: 1, sameKeyAsIndex: 0 }]);
 });

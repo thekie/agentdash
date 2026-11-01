@@ -1,12 +1,12 @@
 import { z } from "zod";
 import type { Column } from "./columns.ts";
 import { type Database, quoteId } from "./database.ts";
-import { assertNoIssues, type Issue, StorageError } from "./errors.ts";
-import { failIfArchived, findStore, liveColumns, type StoreRow, tableOf } from "./stores.ts";
+import { assertNoIssues, assertVersion, type Issue, type Path, StorageError } from "./errors.ts";
+import { assertStoreLive, findStore, liveColumns, type StoreRow, tableOf } from "./stores.ts";
 import { formatValue, parseValue, type StoredValue } from "./values.ts";
 
 /** The most rows one append or update may carry. */
-export const MAX_BATCH = 1000;
+const MAX_BATCH = 1000;
 
 const RowRecord = z
   .object({
@@ -43,7 +43,7 @@ type StoredValues = Map<string, StoredValue>;
 function parseValues(
   columns: Column[],
   values: Record<string, unknown>,
-  path: (string | number)[],
+  path: Path,
   issues: Issue[],
 ): StoredValues {
   const stored: StoredValues = new Map();
@@ -64,7 +64,7 @@ function parseValues(
   return stored;
 }
 
-function checkBatchSize(count: number): void {
+function assertBatchSize(count: number): void {
   if (count > MAX_BATCH) {
     throw new StorageError("invalid", `At most ${MAX_BATCH} rows per call, got ${count}`, {
       issues: [{ path: ["rows"], problem: "too many rows" }],
@@ -117,13 +117,13 @@ function writeValues(
   );
 }
 
-function readRow(db: Database, store: StoreRow, id: number): RowRecord | undefined {
+function rowRecord(db: Database, store: StoreRow, id: number): RowRecord | undefined {
   return db.one(RowRecord, `SELECT * FROM ${tableOf(store)} WHERE id = ?`, id);
 }
 
 function writableStore(db: Database, ref: string): StoreRow {
   const store = findStore(db, ref);
-  failIfArchived(store);
+  assertStoreLive(store);
   return store;
 }
 
@@ -143,34 +143,42 @@ export interface AppendResult {
 }
 
 /**
- * Appends rows, all or none. A row whose Key matches a live row follows `onConflict`: `error`
+ * Appends rows; run it inside a transaction so a failure writes none. A row whose Key matches a live row follows `onConflict`: `error`
  * (the default) fails with `conflict` listing the matching rows, `update` overwrites the given
  * values, `skip` leaves the row as it is. Fails with `invalid` listing every bad value.
  */
 export function appendRows(db: Database, input: AppendRowsInput, now: string): AppendResult {
-  checkBatchSize(input.rows.length);
+  assertBatchSize(input.rows.length);
   const store = writableStore(db, input.store);
   const issues: Issue[] = [];
   const parsed = input.rows.map((row, index) =>
     parseValues(liveColumns(store), row, ["rows", index], issues),
   );
   assertNoIssues(issues, "Some rows do not fit the Data Store's columns");
-  return db.transaction(() => {
-    const result: AppendResult = { inserted: [], updated: [], skipped: [] };
-    const matches: { index: number; row: Row }[] = [];
-    for (const [index, values] of parsed.entries()) {
-      const outcome = appendOne(db, store, values, input.onConflict ?? "error", now);
-      if ("match" in outcome) matches.push({ index, row: outcome.match });
-      else result[outcome.list].push(outcome.id);
-    }
-    if (matches.length > 0) {
-      throw new StorageError("conflict", `${matches.length} rows match existing rows by Key`, {
-        current: matches,
-        hint: 'Pass onConflict "update" to overwrite them or "skip" to keep them.',
-      });
-    }
-    return result;
-  });
+  const result: AppendResult = { inserted: [], updated: [], skipped: [] };
+  const conflicts: KeyConflict[] = [];
+  const insertedBy = new Map<number, number>();
+  for (const [index, values] of parsed.entries()) {
+    const outcome = appendOne(db, store, values, input.onConflict ?? "error", now);
+    if ("match" in outcome) conflicts.push(keyConflict(index, outcome.match, insertedBy));
+    else result[outcome.list].push(outcome.id);
+    if ("list" in outcome && outcome.list === "inserted") insertedBy.set(outcome.id, index);
+  }
+  if (conflicts.length > 0) {
+    throw new StorageError("conflict", `${conflicts.length} rows share a Key with another row`, {
+      current: conflicts,
+      hint: 'Pass onConflict "update" to overwrite existing rows or "skip" to keep them.',
+    });
+  }
+  return result;
+}
+
+/** An appended row whose Key matches a stored row, or an earlier row of the same batch. */
+export type KeyConflict = { index: number; row: Row } | { index: number; sameKeyAsIndex: number };
+
+function keyConflict(index: number, match: Row, insertedBy: Map<number, number>): KeyConflict {
+  const earlier = insertedBy.get(match.id);
+  return earlier === undefined ? { index, row: match } : { index, sameKeyAsIndex: earlier };
 }
 
 type AppendOutcome = { list: keyof AppendResult; id: number } | { match: Row };
@@ -190,12 +198,7 @@ function appendOne(
   return { list: "updated", id: match.id };
 }
 
-function failOnKeyCollision(
-  db: Database,
-  store: StoreRow,
-  record: RowRecord,
-  path: (string | number)[],
-): void {
+function assertKeyFree(db: Database, store: StoreRow, record: RowRecord, path: Path): void {
   const values: StoredValues = new Map(store.key.map((p) => [p, record[p] ?? null]));
   const other = findByKey(db, store, values, record.id);
   if (other) {
@@ -210,24 +213,15 @@ function failOnKeyCollision(
   }
 }
 
-function versionedRow(
+function rowAtVersion(
   db: Database,
   store: StoreRow,
   id: number,
   expectedVersion: number,
 ): RowRecord {
-  const record = readRow(db, store, id);
+  const record = rowRecord(db, store, id);
   if (!record) throw new StorageError("not_found", `No row ${id} in Data Store "${store.name}"`);
-  if (record.version !== expectedVersion) {
-    throw new StorageError(
-      "conflict",
-      `Row ${id}: expected version ${expectedVersion}, found ${record.version}`,
-      {
-        current: toRow(store, record),
-        hint: "Merge your change into `current` and retry with its version.",
-      },
-    );
-  }
+  assertVersion(record, expectedVersion, () => toRow(store, record));
   return record;
 }
 
@@ -238,29 +232,33 @@ export interface RowUpdate {
   values: Record<string, unknown>;
 }
 
-/** Changes the given values of rows, all or none. Fails with `conflict` on a stale version or a duplicate Key. */
+/**
+ * Changes the given values of live rows; run it inside a transaction so a failure writes none.
+ * Fails with `conflict` on a stale version or a duplicate Key, and `archived` on an Archived row.
+ */
 export function updateRows(
   db: Database,
   input: { store: string; rows: RowUpdate[] },
   now: string,
 ): Row[] {
-  checkBatchSize(input.rows.length);
+  assertBatchSize(input.rows.length);
   const store = writableStore(db, input.store);
   const issues: Issue[] = [];
-  const parsed = input.rows.map((r, index) =>
-    parseValues(liveColumns(store), r.values, ["rows", index, "values"], issues),
-  );
+  const updates = input.rows.map((update, index) => ({
+    ...update,
+    stored: parseValues(liveColumns(store), update.values, ["rows", index, "values"], issues),
+  }));
   assertNoIssues(issues, "Some values do not fit the Data Store's columns");
-  return db.transaction(() =>
-    input.rows.map((update, index) => {
-      versionedRow(db, store, update.id, update.expectedVersion);
-      writeValues(db, store, update.id, parsed[index] ?? new Map(), now);
-      const record = readRow(db, store, update.id);
-      if (!record) throw new StorageError("not_found", `No row ${update.id}`);
-      if (record.archivedAt === null) failOnKeyCollision(db, store, record, ["rows", index]);
-      return toRow(store, record);
-    }),
-  );
+  return updates.map((update, index) => {
+    const before = rowAtVersion(db, store, update.id, update.expectedVersion);
+    if (before.archivedAt !== null) {
+      throw new StorageError("archived", `Row ${update.id} is Archived; restore it first`);
+    }
+    writeValues(db, store, update.id, update.stored, now);
+    const record = { ...before, ...Object.fromEntries(update.stored) };
+    assertKeyFree(db, store, record, ["rows", index]);
+    return toRow(store, { ...record, version: before.version + 1, updatedAt: now });
+  });
 }
 
 export interface RowRef {
@@ -276,17 +274,16 @@ function setRowArchivedAt(
   now: string,
 ): Row {
   const store = writableStore(db, input.store);
-  const record = versionedRow(db, store, input.id, input.expectedVersion);
+  const record = rowAtVersion(db, store, input.id, input.expectedVersion);
   if ((record.archivedAt === null) === (archivedAt === null)) return toRow(store, record);
-  if (archivedAt === null) failOnKeyCollision(db, store, record, ["id"]);
+  if (archivedAt === null) assertKeyFree(db, store, record, ["id"]);
   db.run(
     `UPDATE ${tableOf(store)} SET archivedAt = ?, version = version + 1, updatedAt = ? WHERE id = ?`,
     archivedAt,
     now,
     input.id,
   );
-  const updated = readRow(db, store, input.id);
-  return toRow(store, updated ?? record);
+  return toRow(store, { ...record, archivedAt, version: record.version + 1, updatedAt: now });
 }
 
 /** Archives a row. Archiving it again changes nothing. */
@@ -299,11 +296,19 @@ export function restoreRow(db: Database, input: RowRef, now: string): Row {
   return setRowArchivedAt(db, input, null, now);
 }
 
-/** Rows of a Data Store in insertion order: the live ones, or with `archived` the Archived ones. */
-export function listRows(db: Database, ref: string, options: { archived?: boolean } = {}): Row[] {
+function rowsWhere(db: Database, ref: string, archivedAt: "IS NULL" | "IS NOT NULL"): Row[] {
   const store = findStore(db, ref);
-  const filter = options.archived ? "IS NOT NULL" : "IS NULL";
   return db
-    .all(RowRecord, `SELECT * FROM ${tableOf(store)} WHERE archivedAt ${filter} ORDER BY id`)
+    .all(RowRecord, `SELECT * FROM ${tableOf(store)} WHERE archivedAt ${archivedAt} ORDER BY id`)
     .map((record) => toRow(store, record));
+}
+
+/** The live rows of a Data Store, by id or name, in insertion order. */
+export function liveRows(db: Database, ref: string): Row[] {
+  return rowsWhere(db, ref, "IS NULL");
+}
+
+/** The Archived rows of a Data Store, by id or name, in insertion order. */
+export function archivedRows(db: Database, ref: string): Row[] {
+  return rowsWhere(db, ref, "IS NOT NULL");
 }

@@ -5,10 +5,13 @@ import {
   ColumnSpec,
   ColumnTypeSpec,
   EnumOptionSpec,
+  type ParsedColumnSpec,
+  type ParsedColumnType,
   storedType,
 } from "./columns.ts";
 import { createId, type Database, quoteId } from "./database.ts";
-import { assertNoIssues, type Issue, StorageError } from "./errors.ts";
+import { assertNoIssues, assertVersion, type Issue, type Path, StorageError } from "./errors.ts";
+import type { VersionedRef } from "./tree.ts";
 import { formatValue, retypeValue, sqlTypeOf } from "./values.ts";
 
 const StoreRow = z.object({
@@ -44,11 +47,12 @@ export function tableOf(store: { id: string }): string {
   return quoteId(`ds_${store.id}`);
 }
 
+/** The columns that are not Archived, in order. */
 export function liveColumns(store: StoreRow): Column[] {
   return store.columns.filter((c) => c.archivedAt === undefined);
 }
 
-function readStore(db: Database, ref: string): StoreRow | undefined {
+function storeRow(db: Database, ref: string): StoreRow | undefined {
   return (
     db.one(StoreRow, "SELECT * FROM stores WHERE id = ?", ref) ??
     db.one(StoreRow, "SELECT * FROM stores WHERE name = ? AND archivedAt IS NULL", ref)
@@ -57,13 +61,13 @@ function readStore(db: Database, ref: string): StoreRow | undefined {
 
 /** Finds a Data Store by id or live name. Fails with `not_found`. */
 export function findStore(db: Database, ref: string): StoreRow {
-  const store = readStore(db, ref);
+  const store = storeRow(db, ref);
   if (!store) throw new StorageError("not_found", `No Data Store with id or name "${ref}"`);
   return store;
 }
 
 /** Fails with `archived` when the Data Store is Archived. */
-export function failIfArchived(store: StoreRow): void {
+export function assertStoreLive(store: StoreRow): void {
   if (store.archivedAt !== null) {
     throw new StorageError(
       "archived",
@@ -92,22 +96,8 @@ export function toDataStore(db: Database, store: StoreRow): DataStore {
   };
 }
 
-/** Fails with `conflict` when the Data Store's version is not `expectedVersion`, returning it. */
-export function checkStoreVersion(db: Database, store: StoreRow, expectedVersion: number): void {
-  if (store.version !== expectedVersion) {
-    throw new StorageError(
-      "conflict",
-      `Expected version ${expectedVersion}, found ${store.version}`,
-      {
-        current: toDataStore(db, store),
-        hint: "Merge your change into `current` and retry with its version.",
-      },
-    );
-  }
-}
-
 /** Fails with `conflict` when another live Data Store has the name, returning that Data Store. */
-function checkName(db: Database, name: string, self?: string): void {
+function assertNameFree(db: Database, name: string, self?: string): void {
   const taken = db.one(
     StoreRow,
     "SELECT * FROM stores WHERE name = ? AND archivedAt IS NULL",
@@ -120,7 +110,7 @@ function checkName(db: Database, name: string, self?: string): void {
   }
 }
 
-function duplicateKeyIssues(keys: string[], path: (string | number)[]): Issue[] {
+function duplicateKeyIssues(keys: string[], path: Path): Issue[] {
   return keys.flatMap((key, index) =>
     keys.indexOf(key) === index
       ? []
@@ -129,12 +119,7 @@ function duplicateKeyIssues(keys: string[], path: (string | number)[]): Issue[] 
 }
 
 /** The physical names of the given live column keys, reporting unknown keys as issues. */
-function physicalNames(
-  columns: Column[],
-  keys: string[],
-  path: (string | number)[],
-  issues: Issue[],
-): string[] {
+function physicalNames(columns: Column[], keys: string[], path: Path, issues: Issue[]): string[] {
   return keys.flatMap((key, index) => {
     const column = columns.find((c) => c.key === key);
     if (column) return [column.physical];
@@ -156,12 +141,15 @@ export interface CreateStoreInput {
 
 /** Creates a Data Store. Fails with `conflict` when a live Data Store has the name, returning it. */
 export function createStore(db: Database, input: CreateStoreInput, now: string): DataStore {
-  checkName(db, input.name);
-  const columns = input.columns.map((spec, index) => {
-    const { key, label } = ColumnSpec.parse(spec);
-    const column = { key, physical: `c_${index + 1}`, ...storedType(spec, now) };
-    return label === undefined ? column : { ...column, label };
-  });
+  assertNameFree(db, input.name);
+  const columns = z
+    .array(ColumnSpec)
+    .parse(input.columns)
+    .map((spec, index) => {
+      const { key, label, ...type } = spec;
+      const column = { key, physical: `c_${index + 1}`, ...storedType(type, now) };
+      return label === undefined ? column : { ...column, label };
+    });
   const issues = duplicateKeyIssues(
     columns.map((c) => c.key),
     ["columns"],
@@ -184,16 +172,16 @@ export function createStore(db: Database, input: CreateStoreInput, now: string):
     `CREATE TABLE ${tableOf({ id })} (id INTEGER PRIMARY KEY, version INTEGER NOT NULL,
      createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, archivedAt TEXT${physical}) STRICT`,
   );
-  return getStore(db, id);
+  return dataStore(db, id);
 }
 
 /** Returns a Data Store by id or live name. */
-export function getStore(db: Database, ref: string): DataStore {
+export function dataStore(db: Database, ref: string): DataStore {
   return toDataStore(db, findStore(db, ref));
 }
 
 /** Every live Data Store, by name. */
-export function listStores(db: Database): DataStore[] {
+export function liveStores(db: Database): DataStore[] {
   return db
     .all(StoreRow, "SELECT * FROM stores WHERE archivedAt IS NULL ORDER BY name")
     .map((store) => toDataStore(db, store));
@@ -217,6 +205,7 @@ export const AlterOp = z.discriminatedUnion("op", [
   }),
 ]);
 export type AlterOp = z.input<typeof AlterOp>;
+type ParsedAlterOp = z.output<typeof AlterOp>;
 
 export interface KeyDuplicate {
   values: Record<string, unknown>;
@@ -225,20 +214,20 @@ export interface KeyDuplicate {
 
 export interface OpReport {
   op: AlterOp["op"];
-  /** Values a retype could not convert. They become empty. Lists at most 20 rows. */
+  /** Live values a retype could not convert. They become empty. Lists at most 20 rows. */
   unconverted?: { count: number; rows: { id: number; value: unknown }[] };
   /** Live rows sharing a Key, which block `set_key` and a retype of a Key column. */
   keyDuplicates?: KeyDuplicate[];
 }
 
-/** The Data Store as the ops change it, plus the rows the database holds. */
+/** The Data Store as the ops so far have changed it, with the database and time they write with. */
 interface Draft {
   db: Database;
   store: StoreRow;
   now: string;
 }
 
-function liveColumn(draft: Draft, key: string, path: (string | number)[]): Column {
+function liveColumn(draft: Draft, key: string, path: Path): Column {
   const columns = liveColumns(draft.store);
   const column = columns.find((c) => c.key === key);
   if (column) return column;
@@ -252,7 +241,7 @@ function replaceColumn(draft: Draft, physical: string, next: Column[]): void {
   draft.store.columns.splice(index, 1, ...next);
 }
 
-function failIfKeyTaken(draft: Draft, key: string, path: (string | number)[]): void {
+function assertColumnKeyFree(draft: Draft, key: string, path: Path): void {
   if (liveColumns(draft.store).some((c) => c.key === key)) {
     throw new StorageError("invalid", `A column "${key}" already exists`, {
       issues: [{ path, problem: `duplicate column key "${key}"` }],
@@ -265,7 +254,7 @@ const DuplicateRow = z
   .catchall(z.union([z.string(), z.number(), z.null()]));
 
 /** Live rows that share values in the given physical columns. */
-export function keyDuplicates(draft: Draft, key: string[]): KeyDuplicate[] {
+function keyDuplicates(draft: Draft, key: string[]): KeyDuplicate[] {
   if (key.length === 0) return [];
   const columns = key.map((physical) => draft.store.columns.find((c) => c.physical === physical));
   const list = key.map(quoteId).join(", ");
@@ -282,14 +271,14 @@ export function keyDuplicates(draft: Draft, key: string[]): KeyDuplicate[] {
   }));
 }
 
-function addColumn(draft: Draft, spec: ColumnSpec, path: (string | number)[]): Column {
-  const { key, label } = ColumnSpec.parse(spec);
-  failIfKeyTaken(draft, key, path);
+function addColumn(draft: Draft, spec: ParsedColumnSpec, path: Path): Column {
+  const { key, label, ...type } = spec;
+  assertColumnKeyFree(draft, key, path);
   const physical = `c_${draft.store.nextColumn++}`;
   const column: Column = {
     key,
     physical,
-    ...storedType(spec, draft.now),
+    ...storedType(type, draft.now),
     ...(label === undefined ? {} : { label }),
   };
   draft.store.columns.push(column);
@@ -299,14 +288,13 @@ function addColumn(draft: Draft, spec: ColumnSpec, path: (string | number)[]): C
   return column;
 }
 
-const ValueRow = z.object({ id: z.number(), value: z.union([z.string(), z.number(), z.null()]) });
+const ValueRow = z.object({
+  id: z.number(),
+  value: z.union([z.string(), z.number(), z.null()]),
+  isLive: z.number().transform(Boolean),
+});
 
-function retypeColumn(
-  draft: Draft,
-  key: string,
-  to: ColumnTypeSpec,
-  path: (string | number)[],
-): OpReport {
+function retypeColumn(draft: Draft, key: string, to: ParsedColumnType, path: Path): OpReport {
   const from = liveColumn(draft, key, path);
   const label = from.label === undefined ? {} : { label: from.label };
   const physical = `c_${draft.store.nextColumn++}`;
@@ -319,10 +307,12 @@ function retypeColumn(
   const unconverted: { id: number; value: unknown }[] = [];
   for (const row of draft.db.all(
     ValueRow,
-    `SELECT id, ${quoteId(from.physical)} AS value FROM ${table}`,
+    `SELECT id, ${quoteId(from.physical)} AS value, archivedAt IS NULL AS isLive FROM ${table}`,
   )) {
     const value = retypeValue(from, column, row.value);
-    if (value === undefined) unconverted.push({ id: row.id, value: formatValue(from, row.value) });
+    // Archived rows convert too, but only live rows are reported.
+    if (value === undefined && row.isLive)
+      unconverted.push({ id: row.id, value: formatValue(from, row.value) });
     draft.db.run(
       `UPDATE ${table} SET ${quoteId(physical)} = ? WHERE id = ?`,
       value ?? null,
@@ -338,7 +328,7 @@ function retypeColumn(
     : report;
 }
 
-function archiveColumn(draft: Draft, key: string, path: (string | number)[]): void {
+function archiveColumn(draft: Draft, key: string, path: Path): void {
   const column = liveColumn(draft, key, path);
   if (draft.store.key.includes(column.physical)) {
     throw new StorageError("invalid", `Column "${key}" is part of the Key; change the Key first`, {
@@ -348,7 +338,7 @@ function archiveColumn(draft: Draft, key: string, path: (string | number)[]): vo
   replaceColumn(draft, column.physical, [{ ...column, archivedAt: draft.now }]);
 }
 
-function setKey(draft: Draft, keys: string[], path: (string | number)[]): OpReport {
+function setKey(draft: Draft, keys: string[], path: Path): OpReport {
   const issues: Issue[] = [];
   const key = physicalNames(liveColumns(draft.store), keys, path, issues);
   assertNoIssues(issues, "The Key names unknown columns");
@@ -356,12 +346,7 @@ function setKey(draft: Draft, keys: string[], path: (string | number)[]): OpRepo
   return { op: "set_key", keyDuplicates: keyDuplicates(draft, key) };
 }
 
-function setEnumOptions(
-  draft: Draft,
-  key: string,
-  options: EnumOptionSpec[],
-  path: (string | number)[],
-): void {
+function setEnumOptions(draft: Draft, key: string, options: EnumOptionSpec[], path: Path): void {
   const column = liveColumn(draft, key, path);
   if (column.type !== "enum") {
     throw new StorageError("invalid", `Column "${key}" is ${column.type}, not enum`, {
@@ -373,7 +358,7 @@ function setEnumOptions(
   ]);
 }
 
-function applyOp(draft: Draft, op: AlterOp, index: number): OpReport {
+function applyOp(draft: Draft, op: ParsedAlterOp, index: number): OpReport {
   const path = ["ops", index, "column"];
   switch (op.op) {
     case "add_column":
@@ -381,7 +366,7 @@ function applyOp(draft: Draft, op: AlterOp, index: number): OpReport {
       return { op: op.op };
     case "rename_column": {
       const column = liveColumn(draft, op.column, path);
-      if (op.to !== op.column) failIfKeyTaken(draft, op.to, ["ops", index, "to"]);
+      if (op.to !== op.column) assertColumnKeyFree(draft, op.to, ["ops", index, "to"]);
       replaceColumn(draft, column.physical, [
         { ...column, key: op.to, ...(op.label === undefined ? {} : { label: op.label }) },
       ]);
@@ -415,7 +400,8 @@ export interface AlterResult {
 
 function applyOps(db: Database, store: StoreRow, input: AlterStoreInput, now: string): AlterResult {
   const draft: Draft = { db, store: structuredClone(store), now };
-  const reports = input.ops.map((op, index) => applyOp(draft, op, index));
+  const ops = z.array(AlterOp).parse(input.ops);
+  const reports = ops.map((op, index) => applyOp(draft, op, index));
   db.run(
     `UPDATE stores SET columns = ?, key = ?, nextColumn = ?, version = version + 1, updatedAt = ? WHERE id = ?`,
     JSON.stringify(draft.store.columns),
@@ -424,66 +410,57 @@ function applyOps(db: Database, store: StoreRow, input: AlterStoreInput, now: st
     now,
     store.id,
   );
-  return { store: getStore(db, store.id), reports };
+  return { store: dataStore(db, store.id), reports };
 }
 
 /**
- * Applies schema ops in order, all or none. With `dryRun` it reports what they would do and changes
+ * Applies schema ops in order. Run it inside a transaction: a failing op leaves earlier ones
+ * applied until the caller rolls back. With `dryRun` it reports what they would do and changes
  * nothing. Fails with `conflict` when the ops leave live rows sharing a Key, listing them.
  */
 export function alterStore(db: Database, input: AlterStoreInput, now: string): AlterResult {
   const store = findStore(db, input.store);
-  checkStoreVersion(db, store, input.expectedVersion);
-  failIfArchived(store);
+  assertVersion(store, input.expectedVersion, () => toDataStore(db, store));
+  assertStoreLive(store);
   if (input.dryRun) return db.rehearse(() => applyOps(db, store, input, now));
-  return db.transaction(() => {
-    const result = applyOps(db, store, input, now);
-    const duplicates = result.reports.flatMap((r) => r.keyDuplicates ?? []);
-    if (duplicates.length > 0) {
-      throw new StorageError("conflict", "Live rows would share a Key", {
-        current: duplicates,
-        hint: "Archive or update the duplicate rows, or choose another Key. A dryRun shows them without changing anything.",
-      });
-    }
-    return result;
-  });
+  const result = applyOps(db, store, input, now);
+  const duplicates = result.reports.flatMap((r) => r.keyDuplicates ?? []);
+  if (duplicates.length > 0) {
+    throw new StorageError("conflict", "Live rows would share a Key", {
+      current: duplicates,
+      hint: "Archive or update the duplicate rows, or choose another Key. A dryRun shows them without changing anything.",
+    });
+  }
+  return result;
 }
 
-/** Archives a Data Store. Its Widgets show an "archived data" placeholder. Archiving it again changes nothing. */
-export function archiveStore(
-  db: Database,
-  input: { id: string; expectedVersion: number },
-  now: string,
-): DataStore {
+/** Archives a Data Store. Archiving it again changes nothing. */
+export function archiveStore(db: Database, input: VersionedRef, now: string): DataStore {
   return setStoreArchivedAt(db, input, now, now);
 }
 
 /** Restores an Archived Data Store. Fails with `conflict` when a live Data Store took its name. */
-export function restoreStore(
-  db: Database,
-  input: { id: string; expectedVersion: number },
-  now: string,
-): DataStore {
+export function restoreStore(db: Database, input: VersionedRef, now: string): DataStore {
   return setStoreArchivedAt(db, input, null, now);
 }
 
 function setStoreArchivedAt(
   db: Database,
-  input: { id: string; expectedVersion: number },
+  input: VersionedRef,
   archivedAt: string | null,
   now: string,
 ): DataStore {
   const store = findStore(db, input.id);
-  checkStoreVersion(db, store, input.expectedVersion);
+  assertVersion(store, input.expectedVersion, () => toDataStore(db, store));
   if ((store.archivedAt === null) === (archivedAt === null)) return toDataStore(db, store);
-  if (archivedAt === null) checkName(db, store.name, store.id);
+  if (archivedAt === null) assertNameFree(db, store.name, store.id);
   db.run(
     "UPDATE stores SET archivedAt = ?, version = version + 1, updatedAt = ? WHERE id = ?",
     archivedAt,
     now,
     store.id,
   );
-  return getStore(db, store.id);
+  return dataStore(db, store.id);
 }
 
 /** Data Stores that are Archived. */

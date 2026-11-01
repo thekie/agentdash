@@ -18,14 +18,14 @@ test("an Area gets its slug and path from the title", ({ storage }) => {
 test("a nested Dashboard is found by its path", ({ storage }) => {
   const finance = storage.createDashboard({ title: "Finance" });
   const budget = storage.createDashboard({ parent: finance.id, title: "Budget", slug: "monthly" });
-  expect(storage.getDashboard("finance/monthly")).toMatchObject({
+  expect(storage.dashboard("finance/monthly")).toMatchObject({
     id: budget.id,
     path: "finance/monthly",
   });
 });
 
 test("an unknown path is not_found", ({ storage }) => {
-  expect(failureOf(() => storage.getDashboard("nowhere")).code).toBe("not_found");
+  expect(failureOf(() => storage.dashboard("nowhere")).code).toBe("not_found");
 });
 
 test("creating a Dashboard whose slug a sibling has fails with conflict and returns the sibling", ({
@@ -46,7 +46,7 @@ test("a slug that is not lowercase words is invalid", ({ storage }) => {
 test("a new title keeps the slug and bumps the version", ({ storage }) => {
   const area = storage.createDashboard({ title: "Health" });
   const renamed = storage.updateDashboard({
-    dashboard: area.id,
+    id: area.id,
     expectedVersion: 1,
     title: "Wellbeing",
     icon: "🌿",
@@ -56,9 +56,9 @@ test("a new title keeps the slug and bumps the version", ({ storage }) => {
 
 test("a stale expectedVersion fails with conflict and returns the current state", ({ storage }) => {
   const area = storage.createDashboard({ title: "Health" });
-  storage.updateDashboard({ dashboard: area.id, expectedVersion: 1, title: "Body" });
+  storage.updateDashboard({ id: area.id, expectedVersion: 1, title: "Body" });
   const failure = failureOf(() =>
-    storage.updateDashboard({ dashboard: area.id, expectedVersion: 1, title: "Mind" }),
+    storage.updateDashboard({ id: area.id, expectedVersion: 1, title: "Mind" }),
   );
   expect(failure.code).toBe("conflict");
   expect(failure.details.current).toMatchObject({ title: "Body", version: 2 });
@@ -69,7 +69,7 @@ test("position anchors order sibling Dashboards", ({ storage }) => {
   storage.createDashboard({ title: "D" });
   storage.createDashboard({ title: "A", position: "first" });
   storage.createDashboard({ title: "C", position: { after: b.id } });
-  expect(storage.getTree().map((d) => d.path)).toEqual(["a", "b", "c", "d"]);
+  expect(storage.tree().map((d) => d.path)).toEqual(["a", "b", "c", "d"]);
 });
 
 test("an anchor that is not a sibling is invalid", ({ storage }) => {
@@ -94,7 +94,7 @@ test("the tree lists every live Dashboard depth first with Widget and child coun
       children: [{ type: "note", config: { markdown: "hi" } }],
     },
   });
-  expect(storage.getTree()).toMatchObject([
+  expect(storage.tree()).toMatchObject([
     { path: "finance", widgetCount: 2, childCount: 1 },
     { path: "finance/budget", widgetCount: 0, childCount: 0 },
     { path: "health", widgetCount: 0, childCount: 0 },
@@ -124,8 +124,8 @@ test("Archiving a Dashboard hides its whole subtree, and only it is listed as Ar
   storage.createDashboard({ parent: finance.id, title: "Budget" });
   storage.createDashboard({ title: "Health" });
   storage.archiveDashboard({ id: finance.id, expectedVersion: 1 });
-  expect(storage.getTree().map((d) => d.path)).toEqual(["health"]);
-  expect(storage.listArchived().dashboards.map((d) => d.id)).toEqual([finance.id]);
+  expect(storage.tree().map((d) => d.path)).toEqual(["health"]);
+  expect(storage.archived().dashboards.map((d) => d.id)).toEqual([finance.id]);
 });
 
 test("restoring a Dashboard brings its subtree back", ({ storage }) => {
@@ -133,7 +133,7 @@ test("restoring a Dashboard brings its subtree back", ({ storage }) => {
   storage.createDashboard({ parent: finance.id, title: "Budget" });
   storage.archiveDashboard({ id: finance.id, expectedVersion: 1 });
   storage.restoreDashboard({ id: finance.id, expectedVersion: 2 });
-  expect(storage.getTree().map((d) => d.path)).toEqual(["finance", "finance/budget"]);
+  expect(storage.tree().map((d) => d.path)).toEqual(["finance", "finance/budget"]);
 });
 
 test("Archiving twice changes nothing", ({ storage }) => {
@@ -173,7 +173,7 @@ test("a Widget subtree is added in order and read back nested", ({ storage }) =>
       ],
     },
   });
-  const [columns] = storage.getDashboard("health").widgets;
+  const [columns] = storage.dashboard("health").widgets;
   expect(columns?.children.map((w) => [w.type, w.title, w.projection])).toEqual([
     ["kpi", "Weight", { from: "weight" }],
     ["note", null, null],
@@ -183,7 +183,7 @@ test("a Widget subtree is added in order and read back nested", ({ storage }) =>
 test("adding a Widget leaves the Dashboard's version alone", ({ storage }) => {
   const area = storage.createDashboard({ title: "Health" });
   storage.addWidget({ parent: { dashboard: area.id }, widget: { type: "note", config: {} } });
-  expect(storage.getDashboard(area.id).version).toBe(1);
+  expect(storage.dashboard(area.id).version).toBe(1);
 });
 
 test("updating a Widget replaces its own fields and keeps its children", ({ storage }) => {
@@ -198,7 +198,7 @@ test("updating a Widget replaces its own fields and keeps its children", ({ stor
     },
   });
   const updated = storage.updateWidget({
-    widget: section.id,
+    id: section.id,
     expectedVersion: 1,
     title: "New",
     config: {},
@@ -219,8 +219,8 @@ test("a Widget moves with its subtree to another Dashboard", ({ storage }) => {
     widget: { type: "section", title: "S", config: {}, children: [{ type: "note", config: {} }] },
   });
   storage.moveWidget({ id: section.id, expectedVersion: 1, parent: { dashboard: "to" } });
-  expect(storage.getDashboard(from.id).widgets).toEqual([]);
-  expect(storage.getDashboard(to.id).widgets).toMatchObject([
+  expect(storage.dashboard(from.id).widgets).toEqual([]);
+  expect(storage.dashboard(to.id).widgets).toMatchObject([
     { id: section.id, children: [{ type: "note" }] },
   ]);
 });
@@ -250,9 +250,9 @@ test("an Archived Widget is hidden until restored", ({ storage }) => {
     widget: { type: "note", config: {} },
   });
   storage.archiveWidget({ id: note.id, expectedVersion: 1 });
-  expect(storage.getDashboard(area.id).widgets).toEqual([]);
+  expect(storage.dashboard(area.id).widgets).toEqual([]);
   storage.restoreWidget({ id: note.id, expectedVersion: 2 });
-  expect(storage.getDashboard(area.id).widgets.map((w) => w.id)).toEqual([note.id]);
+  expect(storage.dashboard(area.id).widgets.map((w) => w.id)).toEqual([note.id]);
 });
 
 test("a Widget cannot be restored while its Dashboard is Archived", ({ storage }) => {
@@ -275,7 +275,23 @@ test("data survives reopening the database file", () => {
   first.createDashboard({ title: "Finance" });
   first.close();
   const second = createStorage(file);
-  expect(second.getTree().map((d) => d.path)).toEqual(["finance"]);
+  expect(second.tree().map((d) => d.path)).toEqual(["finance"]);
   second.close();
   rmSync(dir, { recursive: true });
+});
+
+test("reading an Archived Dashboard by id fails with archived", ({ storage }) => {
+  const area = storage.createDashboard({ title: "Finance" });
+  const budget = storage.createDashboard({ parent: area.id, title: "Budget" });
+  storage.archiveDashboard({ id: area.id, expectedVersion: 1 });
+  expect(failureOf(() => storage.dashboard(budget.id)).code).toBe("archived");
+});
+
+test("a restored Dashboard comes back as the last of its siblings", ({ storage }) => {
+  const a = storage.createDashboard({ title: "A" });
+  storage.createDashboard({ title: "B" });
+  storage.archiveDashboard({ id: a.id, expectedVersion: 1 });
+  storage.createDashboard({ title: "C", position: "first" });
+  storage.restoreDashboard({ id: a.id, expectedVersion: 2 });
+  expect(storage.tree().map((d) => d.path)).toEqual(["c", "b", "a"]);
 });

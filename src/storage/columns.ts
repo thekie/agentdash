@@ -47,11 +47,13 @@ export const ColumnTypeSpec = z.discriminatedUnion("type", [
   z.object({ type: z.literal("enum"), options: z.array(EnumOptionSpec).min(1) }),
 ]);
 export type ColumnTypeSpec = z.input<typeof ColumnTypeSpec>;
+export type ParsedColumnType = z.output<typeof ColumnTypeSpec>;
 
 const ColumnBase = z.object({ key: ColumnKey, label: z.string().min(1).optional() });
 
 export const ColumnSpec = z.intersection(ColumnBase, ColumnTypeSpec);
 export type ColumnSpec = z.input<typeof ColumnSpec>;
+export type ParsedColumnSpec = z.output<typeof ColumnSpec>;
 
 const ColumnType = z.discriminatedUnion("type", [
   Text,
@@ -95,8 +97,11 @@ export function mergeEnumOptions(
 }
 
 /** Turns an Agent's column type into the stored form, giving enum options their ids. */
-export function storedType(spec: ColumnTypeSpec, now: string, previous?: ColumnType): ColumnType {
-  const parsed = ColumnTypeSpec.parse(spec);
+export function storedType(
+  parsed: ParsedColumnType,
+  now: string,
+  previous?: ColumnType,
+): ColumnType {
   if (parsed.type !== "enum") return parsed;
   const stored = previous?.type === "enum" ? previous.options : [];
   return { type: "enum", options: mergeEnumOptions(stored, parsed.options, now) };

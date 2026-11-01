@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createId, type Database } from "./database.ts";
-import { StorageError } from "./errors.ts";
+import { assertVersion, StorageError } from "./errors.ts";
 import { type Position, placeAt } from "./position.ts";
 
 const DashboardRow = z.object({
@@ -86,14 +86,13 @@ export interface DashboardWithWidgets extends Dashboard {
 /** Where a Widget sits: directly on a Dashboard (by id or path) or inside a layout Widget. */
 export type WidgetParent = { dashboard: string } | { widget: string };
 
-/** Every Dashboard and Widget, read whole. */
-// ponytail: the tree is read whole per call; fine for one Owner's hundreds of Dashboards, index ancestry if it grows to tens of thousands.
+/** Every Dashboard and Widget, read whole on each call. */
 interface Tree {
   dashboards: Map<string, DashboardRow>;
   widgets: Map<string, WidgetRow>;
 }
 
-function readTree(db: Database): Tree {
+function treeOf(db: Database): Tree {
   const dashboards = db.all(DashboardRow, "SELECT * FROM dashboards ORDER BY ord, id");
   const widgets = db.all(WidgetRow, "SELECT * FROM widgets ORDER BY ord, id");
   return {
@@ -159,7 +158,7 @@ function archivedAbove(tree: Tree, row: WidgetRow): Archived | undefined {
   return dashboard && { kind: "Dashboard", row: dashboard };
 }
 
-function failArchived(archived: Archived | undefined): void {
+function assertNotArchived(archived: Archived | undefined): void {
   if (!archived) return;
   const name = archived.row.title === null ? "" : ` ("${archived.row.title}")`;
   throw new StorageError(
@@ -168,26 +167,9 @@ function failArchived(archived: Archived | undefined): void {
   );
 }
 
-function failUnlessLiveDashboard(tree: Tree, row: DashboardRow | undefined): void {
+function assertDashboardLive(tree: Tree, row: DashboardRow | undefined): void {
   const archived = archivedDashboardAbove(tree, row);
-  failArchived(archived && { kind: "Dashboard", row: archived });
-}
-
-function checkVersion(
-  row: { version: number },
-  expectedVersion: number,
-  current: () => unknown,
-): void {
-  if (row.version !== expectedVersion) {
-    throw new StorageError(
-      "conflict",
-      `Expected version ${expectedVersion}, found ${row.version}`,
-      {
-        current: current(),
-        hint: "Merge your change into `current` and retry with its version.",
-      },
-    );
-  }
+  assertNotArchived(archived && { kind: "Dashboard", row: archived });
 }
 
 function placement(siblings: string[], id: string, position: Position): string[] {
@@ -216,7 +198,7 @@ export function slugFrom(title: string): string {
   return slug || "dashboard";
 }
 
-function checkSlug(tree: Tree, slug: string, parentId: string | null, self?: string): void {
+function assertSlugFree(tree: Tree, slug: string, parentId: string | null, self?: string): void {
   if (!slugPattern.test(slug)) {
     throw new StorageError("invalid", `Slug "${slug}" is not lowercase words joined by -`, {
       issues: [{ path: ["slug"], problem: "invalid slug", expected: "such as monthly-budget" }],
@@ -245,12 +227,12 @@ export interface CreateDashboardInput {
  * title. Fails with `conflict` when a sibling has the slug, returning that sibling.
  */
 export function createDashboard(db: Database, input: CreateDashboardInput, now: string): Dashboard {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   const parent = input.parent === undefined ? undefined : findDashboard(tree, input.parent);
-  failUnlessLiveDashboard(tree, parent);
+  assertDashboardLive(tree, parent);
   const parentId = parent?.id ?? null;
   const slug = input.slug ?? slugFrom(input.title);
-  checkSlug(tree, slug, parentId);
+  assertSlugFree(tree, slug, parentId);
   const id = createId("d");
   db.run(
     `INSERT INTO dashboards (id, parentId, ord, slug, title, icon, description, createdAt, updatedAt)
@@ -270,12 +252,12 @@ export function createDashboard(db: Database, input: CreateDashboardInput, now: 
 }
 
 function dashboardById(db: Database, id: string): Dashboard {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   return toDashboard(tree, findDashboard(tree, id));
 }
 
 export interface UpdateDashboardInput {
-  dashboard: string;
+  id: string;
   expectedVersion: number;
   title?: string | undefined;
   slug?: string | undefined;
@@ -285,11 +267,11 @@ export interface UpdateDashboardInput {
 
 /** Changes the given fields of a Dashboard. A new title keeps the old slug. */
 export function updateDashboard(db: Database, input: UpdateDashboardInput, now: string): Dashboard {
-  const tree = readTree(db);
-  const row = findDashboard(tree, input.dashboard);
-  checkVersion(row, input.expectedVersion, () => toDashboard(tree, row));
-  failUnlessLiveDashboard(tree, row);
-  if (input.slug !== undefined) checkSlug(tree, input.slug, row.parentId, row.id);
+  const tree = treeOf(db);
+  const row = findDashboard(tree, input.id);
+  assertVersion(row, input.expectedVersion, () => toDashboard(tree, row));
+  assertDashboardLive(tree, row);
+  if (input.slug !== undefined) assertSlugFree(tree, input.slug, row.parentId, row.id);
   const next = {
     title: input.title ?? row.title,
     slug: input.slug ?? row.slug,
@@ -323,19 +305,20 @@ function toWidget(tree: Tree, row: WidgetRow): Widget {
   return { id, type, title, config, projection, version, createdAt, updatedAt, children };
 }
 
-/** Returns a Dashboard by id or path with its live Widget tree. */
-export function getDashboard(db: Database, ref: string): DashboardWithWidgets {
-  const tree = readTree(db);
+/** Returns a live Dashboard by id or path with its live Widget tree. Fails with `archived` when it or an ancestor is Archived. */
+export function dashboardWithWidgets(db: Database, ref: string): DashboardWithWidgets {
+  const tree = treeOf(db);
   const row = findDashboard(tree, ref);
+  assertDashboardLive(tree, row);
   const widgets = liveWidgetsIn(tree, `d:${row.id}`).map((w) => toWidget(tree, w));
   return { ...toDashboard(tree, row), widgets };
 }
 
-function countWidgets(tree: Tree, key: string): number {
-  return liveWidgetsIn(tree, key).reduce((n, w) => n + 1 + countWidgets(tree, `w:${w.id}`), 0);
+function widgetCount(tree: Tree, key: string): number {
+  return liveWidgetsIn(tree, key).reduce((n, w) => n + 1 + widgetCount(tree, `w:${w.id}`), 0);
 }
 
-function summarize(tree: Tree, row: DashboardRow): DashboardSummary[] {
+function summaries(tree: Tree, row: DashboardRow): DashboardSummary[] {
   const children = liveChildren(tree, row.id);
   const summary: DashboardSummary = {
     id: row.id,
@@ -343,16 +326,16 @@ function summarize(tree: Tree, row: DashboardRow): DashboardSummary[] {
     path: pathOf(tree, row),
     title: row.title,
     icon: row.icon,
-    widgetCount: countWidgets(tree, `d:${row.id}`),
+    widgetCount: widgetCount(tree, `d:${row.id}`),
     childCount: children.length,
   };
-  return [summary, ...children.flatMap((child) => summarize(tree, child))];
+  return [summary, ...children.flatMap((child) => summaries(tree, child))];
 }
 
 /** Every live Dashboard, depth first in sibling order, with Widget and child counts. */
-export function getTree(db: Database): DashboardSummary[] {
-  const tree = readTree(db);
-  return liveChildren(tree, null).flatMap((area) => summarize(tree, area));
+export function treeSummaries(db: Database): DashboardSummary[] {
+  const tree = treeOf(db);
+  return liveChildren(tree, null).flatMap((area) => summaries(tree, area));
 }
 
 interface Container {
@@ -364,11 +347,11 @@ interface Container {
 function resolveContainer(tree: Tree, parent: WidgetParent): Container {
   if ("dashboard" in parent) {
     const dashboard = findDashboard(tree, parent.dashboard);
-    failUnlessLiveDashboard(tree, dashboard);
+    assertDashboardLive(tree, dashboard);
     return { key: `d:${dashboard.id}`, dashboardId: dashboard.id, parentId: null };
   }
   const widget = findWidget(tree, parent.widget);
-  failArchived(archivedAbove(tree, widget));
+  assertNotArchived(archivedAbove(tree, widget));
   return { key: `w:${widget.id}`, dashboardId: null, parentId: widget.id };
 }
 
@@ -409,7 +392,7 @@ export interface AddWidgetInput {
 
 /** Adds a Widget with its whole subtree. The parent's version does not change. */
 export function addWidget(db: Database, input: AddWidgetInput, now: string): Widget {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   const container = resolveContainer(tree, input.parent);
   const id = insertWidget(db, input.widget, container, 0, now);
   const siblings = liveWidgetsIn(tree, container.key).map((w) => w.id);
@@ -418,12 +401,12 @@ export function addWidget(db: Database, input: AddWidgetInput, now: string): Wid
 }
 
 function widgetById(db: Database, id: string): Widget {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   return toWidget(tree, findWidget(tree, id));
 }
 
 export interface UpdateWidgetInput {
-  widget: string;
+  id: string;
   expectedVersion: number;
   title?: string | undefined;
   config: unknown;
@@ -432,10 +415,10 @@ export interface UpdateWidgetInput {
 
 /** Replaces a Widget's own title, config and Projection. Its children stay as they are. */
 export function updateWidget(db: Database, input: UpdateWidgetInput, now: string): Widget {
-  const tree = readTree(db);
-  const row = findWidget(tree, input.widget);
-  checkVersion(row, input.expectedVersion, () => toWidget(tree, row));
-  failArchived(archivedAbove(tree, row));
+  const tree = treeOf(db);
+  const row = findWidget(tree, input.id);
+  assertVersion(row, input.expectedVersion, () => toWidget(tree, row));
+  assertNotArchived(archivedAbove(tree, row));
   db.run(
     `UPDATE widgets SET title = ?, config = ?, projection = ?, version = version + 1, updatedAt = ?
      WHERE id = ?`,
@@ -464,23 +447,28 @@ export interface MoveInput {
   position?: Position | undefined;
 }
 
+export interface MoveDashboardInput extends MoveInput {
+  /** The new parent by id or path, or `null` to make the Dashboard an Area. */
+  parent: string | null;
+}
+
+export interface MoveWidgetInput extends MoveInput {
+  parent: WidgetParent;
+}
+
 /** Moves a Dashboard under another (by id or path), or to the top level as an Area when `parent` is `null`. */
-export function moveDashboard(
-  db: Database,
-  input: MoveInput & { parent: string | null },
-  now: string,
-): Dashboard {
-  const tree = readTree(db);
+export function moveDashboard(db: Database, input: MoveDashboardInput, now: string): Dashboard {
+  const tree = treeOf(db);
   const row = findDashboard(tree, input.id);
-  checkVersion(row, input.expectedVersion, () => toDashboard(tree, row));
-  failUnlessLiveDashboard(tree, row);
+  assertVersion(row, input.expectedVersion, () => toDashboard(tree, row));
+  assertDashboardLive(tree, row);
   const parent = input.parent === null ? undefined : findDashboard(tree, input.parent);
   if (parent && isDashboardWithin(tree, parent, row.id)) {
     throw new StorageError("invalid", "A Dashboard cannot move under itself or its own children");
   }
-  failUnlessLiveDashboard(tree, parent);
+  assertDashboardLive(tree, parent);
   const parentId = parent?.id ?? null;
-  checkSlug(tree, row.slug, parentId, row.id);
+  assertSlugFree(tree, row.slug, parentId, row.id);
   const siblings = liveChildren(tree, parentId).map((d) => d.id);
   const order = placement(siblings, row.id, input.position ?? "last");
   db.run(
@@ -504,15 +492,11 @@ function isWidgetWithin(tree: Tree, row: WidgetRow | undefined, ancestorId: stri
 }
 
 /** Moves a Widget with its subtree onto a Dashboard or into a layout Widget, possibly on another Dashboard. */
-export function moveWidget(
-  db: Database,
-  input: MoveInput & { parent: WidgetParent },
-  now: string,
-): Widget {
-  const tree = readTree(db);
+export function moveWidget(db: Database, input: MoveWidgetInput, now: string): Widget {
+  const tree = treeOf(db);
   const row = findWidget(tree, input.id);
-  checkVersion(row, input.expectedVersion, () => toWidget(tree, row));
-  failArchived(archivedAbove(tree, row));
+  assertVersion(row, input.expectedVersion, () => toWidget(tree, row));
+  assertNotArchived(archivedAbove(tree, row));
   if (
     "widget" in input.parent &&
     isWidgetWithin(tree, tree.widgets.get(input.parent.widget), row.id)
@@ -555,52 +539,53 @@ function setArchivedAt(
 
 /** Archives a Dashboard and so everything under it. Archiving it again changes nothing. */
 export function archiveDashboard(db: Database, input: VersionedRef, now: string): Dashboard {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   const row = findDashboard(tree, input.id);
-  checkVersion(row, input.expectedVersion, () => toDashboard(tree, row));
+  assertVersion(row, input.expectedVersion, () => toDashboard(tree, row));
   if (row.archivedAt !== null) return toDashboard(tree, row);
-  failUnlessLiveDashboard(tree, row);
+  assertDashboardLive(tree, row);
   setArchivedAt(db, "dashboards", row.id, now, now);
   return dashboardById(db, row.id);
 }
 
 /**
- * Restores an Archived Dashboard with the subtree it Archived. Fails with `conflict` when a live
+ * Restores an Archived Dashboard with the subtree it Archived, as the last of its siblings. Fails with `conflict` when a live
  * sibling took its slug, and with `archived` while an ancestor is still Archived.
  */
 export function restoreDashboard(db: Database, input: VersionedRef, now: string): Dashboard {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   const row = findDashboard(tree, input.id);
-  checkVersion(row, input.expectedVersion, () => toDashboard(tree, row));
+  assertVersion(row, input.expectedVersion, () => toDashboard(tree, row));
   if (row.archivedAt === null) return toDashboard(tree, row);
-  failUnlessLiveDashboard(
-    tree,
-    row.parentId === null ? undefined : tree.dashboards.get(row.parentId),
-  );
-  checkSlug(tree, row.slug, row.parentId, row.id);
+  assertDashboardLive(tree, row.parentId === null ? undefined : tree.dashboards.get(row.parentId));
+  assertSlugFree(tree, row.slug, row.parentId, row.id);
   setArchivedAt(db, "dashboards", row.id, null, now);
+  const siblings = liveChildren(tree, row.parentId).map((d) => d.id);
+  writeOrder(db, "dashboards", placement(siblings, row.id, "last"));
   return dashboardById(db, row.id);
 }
 
 /** Archives a Widget and its subtree. Archiving it again changes nothing. */
 export function archiveWidget(db: Database, input: VersionedRef, now: string): Widget {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   const row = findWidget(tree, input.id);
-  checkVersion(row, input.expectedVersion, () => toWidget(tree, row));
+  assertVersion(row, input.expectedVersion, () => toWidget(tree, row));
   if (row.archivedAt !== null) return toWidget(tree, row);
-  failArchived(archivedAbove(tree, row));
+  assertNotArchived(archivedAbove(tree, row));
   setArchivedAt(db, "widgets", row.id, now, now);
   return widgetById(db, row.id);
 }
 
-/** Restores an Archived Widget with its subtree. Fails with `archived` while an ancestor is still Archived. */
+/** Restores an Archived Widget with its subtree, as the last of its siblings. Fails with `archived` while an ancestor is still Archived. */
 export function restoreWidget(db: Database, input: VersionedRef, now: string): Widget {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   const row = findWidget(tree, input.id);
-  checkVersion(row, input.expectedVersion, () => toWidget(tree, row));
+  assertVersion(row, input.expectedVersion, () => toWidget(tree, row));
   if (row.archivedAt === null) return toWidget(tree, row);
-  failArchived(archivedAbove(tree, { ...row, archivedAt: null }));
+  assertNotArchived(archivedAbove(tree, { ...row, archivedAt: null }));
   setArchivedAt(db, "widgets", row.id, null, now);
+  const siblings = liveWidgetsIn(tree, containerKey(row)).map((w) => w.id);
+  writeOrder(db, "widgets", placement(siblings, row.id, "last"));
   return widgetById(db, row.id);
 }
 
@@ -616,7 +601,7 @@ export function archivedTreeItems(db: Database): {
   dashboards: ArchivedItem[];
   widgets: ArchivedItem[];
 } {
-  const tree = readTree(db);
+  const tree = treeOf(db);
   const pick = (r: DashboardRow | WidgetRow) =>
     r.archivedAt === null
       ? []

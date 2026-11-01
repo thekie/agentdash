@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { type ColumnType, mergeEnumOptions, storedType } from "./columns.ts";
+import { type ColumnType, mergeEnumOptions } from "./columns.ts";
 import { formatValue, parseValue, retypeValue } from "./values.ts";
 
 const text: ColumnType = { type: "text" };
@@ -99,8 +99,4 @@ test("new enum options get fresh ids, renamed ones keep theirs, missing ones are
     { id: "o3", label: "okay", color: "amber" },
     { id: "o2", label: "bad", archivedAt: "2026-01-01T00:00:00.000Z" },
   ]);
-});
-
-test("a stored number type gets the plain format by default", () => {
-  expect(storedType({ type: "number" }, "now")).toEqual({ type: "number", format: "plain" });
 });

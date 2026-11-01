@@ -1,12 +1,12 @@
 import { type Database, openDatabase } from "./database.ts";
-import { appendRows, archiveRow, listRows, restoreRow, updateRows } from "./rows.ts";
+import { appendRows, archivedRows, archiveRow, liveRows, restoreRow, updateRows } from "./rows.ts";
 import {
   alterStore,
   archivedStores,
   archiveStore,
   createStore,
-  getStore,
-  listStores,
+  dataStore,
+  liveStores,
   restoreStore,
 } from "./stores.ts";
 import {
@@ -15,12 +15,12 @@ import {
   archivedTreeItems,
   archiveWidget,
   createDashboard,
-  getDashboard,
-  getTree,
+  dashboardWithWidgets,
   moveDashboard,
   moveWidget,
   restoreDashboard,
   restoreWidget,
+  treeSummaries,
   updateDashboard,
   updateWidget,
 } from "./tree.ts";
@@ -43,8 +43,8 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     (input: I): O =>
       db.transaction(() => change(db, input, now()));
   return {
-    getTree: () => getTree(db),
-    getDashboard: (ref: string) => getDashboard(db, ref),
+    tree: () => treeSummaries(db),
+    dashboard: (ref: string) => dashboardWithWidgets(db, ref),
     createDashboard: write(createDashboard),
     updateDashboard: write(updateDashboard),
     moveDashboard: write(moveDashboard),
@@ -57,21 +57,22 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     archiveWidget: write(archiveWidget),
     restoreWidget: write(restoreWidget),
 
-    listStores: () => listStores(db),
-    getStore: (ref: string) => getStore(db, ref),
+    stores: () => liveStores(db),
+    store: (ref: string) => dataStore(db, ref),
     createStore: write(createStore),
     alterStore: write(alterStore),
     archiveStore: write(archiveStore),
     restoreStore: write(restoreStore),
 
-    listRows: (store: string, filter?: { archived?: boolean }) => listRows(db, store, filter),
+    rows: (store: string) => liveRows(db, store),
+    archivedRows: (store: string) => archivedRows(db, store),
     appendRows: write(appendRows),
     updateRows: write(updateRows),
     archiveRow: write(archiveRow),
     restoreRow: write(restoreRow),
 
     /** Everything Archived directly, so an Agent can find it and restore it. */
-    listArchived: () => ({ ...archivedTreeItems(db), stores: archivedStores(db) }),
+    archived: () => ({ ...archivedTreeItems(db), stores: archivedStores(db) }),
     close: () => db.close(),
   };
 }
