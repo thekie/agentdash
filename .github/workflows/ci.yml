@@ -1,0 +1,40 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: npm }
+      - run: npm ci
+      - run: npx biome ci .
+      - run: npx tsc
+      - run: npx vitest run
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps --only-shell chromium
+      - run: npm run e2e
+      - name: MCP smoke (Inspector CLI)
+        run: |
+          node src/main.ts --port 4398 --data-dir .data/smoke &
+          timeout 30 sh -c 'until curl -sf -o /dev/null http://127.0.0.1:4398/; do sleep 1; done'
+          npx --yes @modelcontextprotocol/inspector@2.13.0 --cli --transport http \
+            --server-url http://127.0.0.1:4398/mcp --method initialize --connect-timeout 10000 --format json \
+            | jq -e '.result.serverInfo.name == "agentdash"'
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with: { name: playwright-report, path: playwright-report/, retention-days: 14 }

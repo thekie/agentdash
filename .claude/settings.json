@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>console.log(JSON.parse(s).tool_input?.file_path??\"\"))'); [ -n \"$f\" ] && npx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true \"$f\" >&2 || exit 2"
+          }
+        ]
+      }
+    ]
+  }
+}
