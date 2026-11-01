@@ -35,6 +35,10 @@ The fixed set of Widget types agentdash can render. Agents configure Widgets; th
 A table of data whose columns an Agent defines and fills, such as a weight log or a monthly budget. A time series is a Data Store with a time column.
 _Avoid_: series, dataset, collection
 
+**Key**:
+The optional set of columns that identify a row in a Data Store, such as the date in a weight log. Writing a row whose Key matches an existing row targets that row instead of adding a duplicate.
+_Avoid_: id, primary key
+
 **Projection**:
 A Widget's declarative description of which Data Stores it reads and how it filters, joins, groups, and aggregates them into the slots the Widget draws.
 _Avoid_: query, mapping, view
