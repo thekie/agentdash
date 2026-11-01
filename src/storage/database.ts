@@ -50,10 +50,10 @@ CREATE UNIQUE INDEX storesLiveName ON stores(name) WHERE archivedAt IS NULL;
 `;
 
 /**
- * Each entry upgrades the database by one `user_version`. A database never runs an entry twice, so
- * a schema change needs a new entry.
+ * The schema changes in order. Each entry upgrades a database by one `user_version`. A database
+ * never runs an entry twice, so a schema change needs a new entry at the end.
  */
-const migrations = [schema];
+export const migrations = [schema];
 
 /** Describes a connection to the SQLite database. */
 export interface Database {
@@ -116,15 +116,26 @@ export function openDatabase(path: string): Database {
     },
     close: () => sqlite.close(),
   };
-  migrate(sqlite);
+  migrate(sqlite, migrations);
   return database;
 }
 
-function migrate(sqlite: DatabaseSync): void {
+/**
+ * Runs each entry of `entries` that the database has not run, in its own transaction. If an entry
+ * fails, it rolls that entry back and throws the SQLite error.
+ */
+export function migrate(sqlite: DatabaseSync, entries: string[]): void {
   const version = Number(sqlite.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-  for (const [index, migration] of migrations.entries()) {
+  for (const [index, entry] of entries.entries()) {
     if (index < version) continue;
-    sqlite.exec(`BEGIN; ${migration}; PRAGMA user_version = ${index + 1}; COMMIT;`);
+    sqlite.exec("BEGIN");
+    try {
+      sqlite.exec(`${entry}; PRAGMA user_version = ${index + 1}`);
+      sqlite.exec("COMMIT");
+    } catch (error) {
+      sqlite.exec("ROLLBACK");
+      throw error;
+    }
   }
 }
 
