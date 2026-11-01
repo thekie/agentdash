@@ -1,0 +1,246 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Answers: "How should Areas, nested Dashboards, and Widgets look and navigate in the browser?"
+  Three variants on one page, switch with ?variant=A|B|C or the bottom bar (← → keys). ?empty=1 shows the empty state.
+  Navigation is the hash (#/finance/budget-2026). "Agent write" simulates a live update.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>agentdash prototype</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1f2328; --muted:#6b7280; --line:#e5e7eb; --acc:#2563eb; --good:#16a34a; --bad:#dc2626; --s1:#2563eb; --s2:#f59e0b; --s3:#10b981; --s4:#a855f7; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; color:var(--ink); background:var(--bg); }
+  a { color:inherit; text-decoration:none; }
+  h1 { font-size:24px; margin:0; } h2 { font-size:15px; margin:0 0 8px; }
+  .muted { color:var(--muted); font-size:12px; }
+  .w { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; position:relative; }
+  .w.flash { animation:flash 2s; } @keyframes flash { 0% { box-shadow:0 0 0 3px #fde047; } 100% { box-shadow:none; } }
+  .w .ts { position:absolute; top:12px; right:14px; }
+  .wsec { padding:4px 0; } .wsec > h2 { font-size:17px; border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:10px; }
+  .stack > * + * { margin-top:12px; }
+  .cols { display:grid; gap:12px; } @media (max-width:800px) { .cols { grid-template-columns:1fr !important; } }
+  .kpi .v { font-size:28px; font-weight:600; } .up { color:var(--good); } .down { color:var(--bad); }
+  .bar { height:10px; background:#eef0f3; border-radius:5px; overflow:hidden; } .bar > i { display:block; height:100%; background:var(--acc); }
+  table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); } td.n, th.n { text-align:right; }
+  .cl div { padding:3px 0; } .cl .done { text-decoration:line-through; color:var(--muted); } .cl .over { color:var(--bad); }
+  .link { display:flex; gap:10px; align-items:center; } .link .ic { font-size:22px; }
+  .legend span { margin-right:10px; font-size:12px; } .legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; }
+  .crumbs { font-size:13px; color:var(--muted); margin-bottom:6px; } .crumbs a:hover { color:var(--acc); }
+  .nav a { display:block; padding:4px 8px; border-radius:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .nav a:hover { background:#eef0f3; } .nav a.on { background:#e0e7ff; font-weight:600; }
+  .empty { max-width:640px; margin:60px auto; } pre { background:#111827; color:#e5e7eb; padding:12px; border-radius:8px; overflow:auto; font-size:12px; }
+  #sw { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#111; color:#fff; border-radius:999px; padding:6px 10px; display:flex; gap:8px; align-items:center; box-shadow:0 6px 20px #0005; z-index:99; font-size:13px; }
+  #sw button { background:#333; color:#fff; border:0; border-radius:999px; padding:4px 10px; cursor:pointer; } #sw button:hover { background:#555; }
+  /* Variant A */
+  .A { display:flex; min-height:100vh; } .A aside { width:260px; background:#fbfbfa; border-right:1px solid var(--line); padding:14px 8px; position:sticky; top:0; height:100vh; overflow:auto; }
+  .A main { flex:1; padding:28px 40px 80px; } .A .page { max-width:960px; }
+  /* Variant B */
+  .B header { background:var(--panel); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:4px; padding:0 16px; height:48px; position:sticky; top:0; z-index:5; }
+  .B header a { padding:13px 14px; border-bottom:2px solid transparent; } .B header a.on { border-color:var(--acc); font-weight:600; }
+  .B .body { display:flex; } .B aside { width:220px; padding:12px 8px; border-right:1px solid var(--line); min-height:calc(100vh - 48px); }
+  .B main { flex:1; padding:20px 24px 80px; } .B .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px; align-items:start; } .B .grid > .full { grid-column:1 / -1; }
+  /* Variant C */
+  .C { display:grid; grid-template-columns:64px 220px 1fr 280px; min-height:100vh; }
+  .C .rail { background:#111827; padding:10px 0; display:flex; flex-direction:column; align-items:center; gap:6px; } .C .rail a { width:44px; height:44px; display:grid; place-items:center; border-radius:10px; font-size:22px; } .C .rail a.on, .C .rail a:hover { background:#374151; }
+  .C .local { border-right:1px solid var(--line); padding:14px 8px; background:#fbfbfa; } .C main { padding:24px 28px 80px; } .C .feed { border-left:1px solid var(--line); padding:14px; background:var(--panel); }
+  .C .feed div { padding:8px 0; border-bottom:1px solid var(--line); } .C .feed div.new { background:#fef9c3; }
+  .C .areas { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="sw"><button id="prev">←</button><span id="lbl"></span><button id="next">→</button><button id="write">⚡ Agent write</button><button id="emp"></button></div>
+<script>
+const NOW = Date.now(), m = n => NOW - n * 60000;
+let wid = 0;
+const W = (type, title, config = {}, extra = {}) => ({ id: 'w' + ++wid, type, title, config, updatedAt: m(Math.floor(Math.random() * 3000) + 5), ...extra });
+
+const DASH = [
+  { id: 'fin', parent: null, slug: 'finance', title: 'Finance', icon: '💶', desc: 'Budget, savings and net worth', updatedAt: m(120), widgets: [
+    W('columns', null, {}, { children: [
+      W('kpi', 'Net worth', { unit: '€', good: 'up', series: [41200, 41900, 42350, 43100, 42800, 44050] }),
+      W('kpi', 'Spent this month', { unit: '€', good: 'down', series: [2310, 2150, 2480, 1980] }),
+      W('progress', 'Emergency fund', { rows: [{ label: '', value: 7400, target: 10000 }], unit: '€' }),
+    ] }),
+    W('chart', 'Monthly spending by category', { mark: 'bar', stacked: true, x: ['Jul', 'Aug', 'Sep', 'Oct'], series: { Rent: [950, 950, 950, 950], Groceries: [420, 390, 460, 380], Leisure: [310, 220, 400, 180], Other: [630, 590, 670, 470] } }),
+    W('note', 'Tips', { html: '<ul><li>Move the Leisure overspend from September into the buffer.</li><li>ETF savings plan runs on the 3rd, so keep €500 on checking.</li></ul>' }),
+  ] },
+  { id: 'bud', parent: 'fin', slug: 'budget-2026', title: 'Budget 2026', icon: '📒', desc: 'Planned vs actual per category', updatedAt: m(35), widgets: [
+    W('progress', 'Category budgets (October)', { unit: '€', rows: [{ label: 'Groceries', value: 380, target: 450 }, { label: 'Leisure', value: 180, target: 250 }, { label: 'Transport', value: 210, target: 150 }] }),
+    W('table', 'Largest expenses', { cols: ['Date', 'Payee', 'Amount'], rows: [['2026-10-28', 'IKEA', '€214.90'], ['2026-10-14', 'Deutsche Bahn', '€129.00'], ['2026-10-03', 'REWE', '€96.12']] }),
+    W('dashboardLink', null, { target: 'gro' }),
+  ] },
+  { id: 'gro', parent: 'bud', slug: 'groceries', title: 'Groceries', icon: '🛒', desc: 'Weekly grocery spend', updatedAt: m(900), widgets: [
+    W('chart', 'Weekly grocery spend', { mark: 'line', x: ['W38', 'W39', 'W40', 'W41', 'W42', 'W43'], series: { Spend: [92, 105, 88, 120, 97, 84] }, unit: '€' }),
+  ] },
+  { id: 'inv', parent: 'fin', slug: 'investments', title: 'Investments', icon: '📈', desc: null, updatedAt: m(2900), widgets: [
+    W('chart', 'Portfolio value', { mark: 'line', x: ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'], series: { Portfolio: [18200, 18900, 19400, 19100, 20300, 21050] }, unit: '€' }),
+  ] },
+  { id: 'tax', parent: 'fin', slug: 'taxes-2026', title: 'Taxes 2026', icon: '🧾', desc: 'Steuererklärung prep', updatedAt: m(4300), widgets: [
+    W('checklist', 'Documents to collect', { items: [{ text: 'Lohnsteuerbescheinigung', done: true }, { text: 'Handwerkerrechnungen', done: false, due: '2026-10-15' }, { text: 'Spendenquittungen', done: false, due: '2027-02-01' }] }),
+  ] },
+  { id: 'hea', parent: null, slug: 'health', title: 'Health', icon: '🩺', desc: 'Weight, training and sleep', updatedAt: m(12), widgets: [
+    W('columns', null, {}, { children: [
+      W('kpi', 'Weight', { unit: 'kg', good: 'down', series: [84.1, 83.8, 83.9, 83.2, 82.9, 82.6], live: true }),
+      W('kpi', 'Avg steps (7d)', { unit: 'steps', good: 'up', series: [7400, 8100, 7900, 9200] }),
+    ] }),
+    W('chart', 'Weight', { mark: 'line', x: ['Sep 20', 'Sep 27', 'Oct 4', 'Oct 11', 'Oct 18', 'Oct 25'], series: { Weight: [84.1, 83.8, 83.9, 83.2, 82.9, 82.6] }, unit: 'kg', live: true }),
+    W('section', 'This week', {}, { children: [
+      W('columns', null, {}, { children: [
+        W('checklist', 'Workouts', { items: [{ text: 'Mon: 5k easy run', done: true }, { text: 'Wed: strength A', done: true }, { text: 'Fri: intervals', done: false, due: '2026-10-31' }, { text: 'Sun: long run', done: false, due: '2026-11-02' }] }),
+        W('note', 'Tips', { html: '<p>Protein target is <b>150 g/day</b>. You hit it 4 of 7 days last week; breakfast is where it drops.</p>' }),
+      ] }),
+    ] }),
+  ] },
+  { id: 'tra', parent: 'hea', slug: 'training', title: 'Training', icon: '🏃', desc: 'Running and strength', updatedAt: m(240), widgets: [
+    W('chart', 'Weekly km', { mark: 'bar', x: ['W40', 'W41', 'W42', 'W43'], series: { Run: [18, 22, 15, 26] }, unit: 'km' }),
+    W('dashboardLink', null, { target: 'run' }),
+  ] },
+  { id: 'run', parent: 'tra', slug: 'running-log', title: 'Running log', icon: '👟', desc: 'Every run', updatedAt: m(240), widgets: [
+    W('table', 'Runs', { cols: ['Date', 'Distance', 'Pace'], num: [1], rows: [['2026-10-29', '10.2 km', '5:31'], ['2026-10-27', '5.0 km', '5:58'], ['2026-10-25', '21.1 km', '5:49']] }),
+  ] },
+  { id: 'sle', parent: 'hea', slug: 'sleep', title: 'Sleep', icon: '😴', desc: null, updatedAt: m(1500), widgets: [
+    W('kpi', 'Avg sleep (7d)', { unit: 'h', good: 'up', series: [6.8, 7.1, 6.9, 7.4] }),
+  ] },
+];
+
+const byId = Object.fromEntries(DASH.map(d => [d.id, d]));
+const kids = id => DASH.filter(d => d.parent === id);
+const areas = () => kids(null);
+const chain = d => d ? [...chain(byId[d.parent]), d] : [];
+const path = d => '#/' + chain(d).map(x => x.slug).join('/');
+const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago'; };
+const fmt = (v, u) => u === '€' ? '€' + v.toLocaleString('en') : v.toLocaleString('en') + (u ? ' ' + u : '');
+const COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)'];
+let flashId = null;
+
+function current() {
+  const segs = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  let d = null;
+  for (const s of segs) d = (d ? kids(d.id) : areas()).find(x => x.slug === s) || d;
+  return d;
+}
+
+function spark(arr, w = 120, h = 30) {
+  const mn = Math.min(...arr), mx = Math.max(...arr), r = mx - mn || 1;
+  const pts = arr.map((v, i) => `${(i / (arr.length - 1)) * w},${h - ((v - mn) / r) * (h - 4) - 2}`).join(' ');
+  return `<svg width="${w}" height="${h}"><polyline fill="none" stroke="var(--acc)" stroke-width="2" points="${pts}"/></svg>`;
+}
+
+function chart(c) {
+  const W = 560, H = 180, P = 28, names = Object.keys(c.series), n = c.x.length;
+  let max = c.stacked ? Math.max(...c.x.map((_, i) => names.reduce((a, k) => a + c.series[k][i], 0))) : Math.max(...names.flatMap(k => c.series[k]));
+  let min = c.mark === 'line' ? Math.min(...names.flatMap(k => c.series[k])) * 0.98 : 0; max *= c.mark === 'line' ? 1.01 : 1;
+  const y = v => H - P - ((v - min) / (max - min)) * (H - 2 * P), xs = i => P + (i + 0.5) * (W - 2 * P) / n;
+  let g = c.x.map((l, i) => `<text x="${xs(i)}" y="${H - 8}" font-size="11" text-anchor="middle" fill="#6b7280">${l}</text>`).join('');
+  g += `<text x="2" y="${P - 10}" font-size="11" fill="#6b7280">${fmt(Math.round(max), c.unit)}</text>`;
+  if (c.mark === 'line') names.forEach((k, j) => {
+    g += `<polyline fill="none" stroke="${COLORS[j]}" stroke-width="2.5" points="${c.series[k].map((v, i) => xs(i) + ',' + y(v)).join(' ')}"/>`;
+    g += c.series[k].map((v, i) => `<circle cx="${xs(i)}" cy="${y(v)}" r="3" fill="${COLORS[j]}"><title>${fmt(v, c.unit)}</title></circle>`).join('');
+  });
+  else { const bw = (W - 2 * P) / n * 0.6; c.x.forEach((_, i) => { let base = 0; names.forEach((k, j) => { const v = c.series[k][i]; g += `<rect x="${xs(i) - bw / 2}" y="${y(base + v)}" width="${bw}" height="${y(base) - y(base + v)}" fill="${COLORS[j]}"><title>${k}: ${fmt(v, c.unit)}</title></rect>`; base += v; }); }); }
+  const legend = names.length > 1 ? `<div class="legend">${names.map((k, j) => `<span><i style="background:${COLORS[j]}"></i>${k}</span>`).join('')}</div>` : '';
+  return legend + `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-height:220px">${g}</svg>`;
+}
+
+function body(w) {
+  const c = w.config;
+  switch (w.type) {
+    case 'kpi': { const s = c.series, last = s.at(-1), d = last - s.at(-2), good = (d > 0) === (c.good === 'up');
+      return `<div class="kpi"><div class="v">${fmt(last, c.unit)}</div><span class="${good ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${fmt(Math.abs(+d.toFixed(1)), c.unit)}</span> <span class="muted">vs previous</span><div>${spark(s)}</div></div>`; }
+    case 'chart': return chart(c);
+    case 'progress': return c.rows.map(r => { const p = r.value / r.target * 100, over = p > 100;
+      return `<div style="margin:6px 0">${r.label ? `<div style="display:flex;justify-content:space-between"><span>${r.label}</span><span class="muted">${fmt(r.value, c.unit)} / ${fmt(r.target, c.unit)}</span></div>` : `<div class="muted">${fmt(r.value, c.unit)} of ${fmt(r.target, c.unit)} (${Math.round(p)}%)</div>`}<div class="bar"><i style="width:${Math.min(p, 100)}%;${over ? 'background:var(--bad)' : ''}"></i></div>${over ? `<span class="down muted">${Math.round(p - 100)}% over</span>` : ''}</div>`; }).join('');
+    case 'table': return `<table><tr>${c.cols.map(h => `<th>${h}</th>`).join('')}</tr>${c.rows.map(r => `<tr>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</table>`;
+    case 'checklist': return `<div class="cl">${[...c.items].sort((a, b) => a.done - b.done).map(i => `<div class="${i.done ? 'done' : (i.due && i.due < '2026-11-01' ? 'over' : '')}">${i.done ? '☑' : '☐'} ${i.text}${i.due && !i.done ? ` <span class="muted">due ${i.due}</span>` : ''}</div>`).join('')}</div>`;
+    case 'note': return c.html;
+    case 'dashboardLink': { const t = byId[c.target]; return `<a class="link" href="${path(t)}"><span class="ic">${t.icon || '📄'}</span><span><b>${t.title}</b><br><span class="muted">${t.desc || ''}</span></span><span style="margin-left:auto">→</span></a>`; }
+  }
+}
+
+// Renders a Widget tree. opts.ts: show "updated Xm ago" on each leaf Widget.
+function widget(w, opts = {}) {
+  if (w.type === 'columns') return `<div class="cols" style="grid-template-columns:repeat(${w.children.length},1fr)">${w.children.map(c => widget(c, opts)).join('')}</div>`;
+  if (w.type === 'section') return `<div class="wsec"><h2>${w.title}</h2><div class="stack">${w.children.map(c => widget(c, opts)).join('')}</div></div>`;
+  return `<div class="w${flashId === w.id ? ' flash' : ''}">${opts.ts !== false ? `<span class="ts muted" title="${new Date(w.updatedAt).toLocaleString()}">${ago(w.updatedAt)}</span>` : ''}${w.title ? `<h2>${w.title}</h2>` : ''}${body(w)}</div>`;
+}
+
+const crumbs = d => `<div class="crumbs">${chain(d).slice(0, -1).map(x => `<a href="${path(x)}">${x.icon || ''} ${x.title}</a> / `).join('')}</div>`;
+const head = d => `${crumbs(d)}<h1>${d.icon || ''} ${d.title}</h1><div class="muted" style="margin:4px 0 20px">${d.desc ? d.desc + ' · ' : ''}updated ${ago(d.updatedAt)}</div>`;
+
+function emptyState() {
+  return `<div class="empty"><h1>No dashboards yet</h1><p>agentdash is empty until an Agent writes to it. Connect one, then ask it something like <i>"Build me a Finance area with my monthly budget."</i></p>
+  <h2>Claude Code</h2><pre>claude mcp add --transport http agentdash http://127.0.0.1:4242/mcp</pre>
+  <h2>Claude Desktop</h2><p class="muted">Add to claude_desktop_config.json, then restart Claude Desktop:</p><pre>{
+  "mcpServers": {
+    "agentdash": { "command": "npx", "args": ["mcp-remote", "http://127.0.0.1:4242/mcp"] }
+  }
+}</pre><p class="muted">This page updates by itself when the first Dashboard appears.</p></div>`;
+}
+
+// Variant A: Notion-style. Full nested tree of every Area in the sidebar, page content in one reading column.
+function VariantA(d) {
+  const tree = (list, depth) => list.map(x => `<a class="${x === d ? 'on' : ''}" style="padding-left:${8 + depth * 14}px" href="${path(x)}">${x.icon || '📄'} ${x.title}</a>${tree(kids(x.id), depth + 1)}`).join('');
+  return `<div class="A"><aside class="nav"><div class="muted" style="padding:0 8px 8px;font-weight:600">agentdash</div>${tree(areas(), 0)}</aside>
+    <main><div class="page">${d ? head(d) + `<div class="stack">${d.widgets.map(w => widget(w)).join('')}</div>` : emptyState()}</div></main></div>`;
+}
+
+// Variant B: Areas as top tabs, sidebar scoped to the current Area, Widgets in a dense auto-fill grid. Timestamps only on the page header.
+function VariantB(d) {
+  const area = d && chain(d)[0];
+  const tree = (list, depth) => list.map(x => `<a class="${x === d ? 'on' : ''}" style="padding-left:${8 + depth * 14}px" href="${path(x)}">${x.icon || '📄'} ${x.title}</a>${tree(kids(x.id), depth + 1)}`).join('');
+  const cell = w => `<div class="${['columns', 'section', 'chart'].includes(w.type) ? 'full' : ''}">${widget(w, { ts: false })}</div>`;
+  return `<div class="B"><header><b style="margin-right:16px">agentdash</b>${areas().map(a => `<a class="${a === area ? 'on' : ''}" href="${path(a)}">${a.icon} ${a.title}</a>`).join('')}</header>
+    ${d ? `<div class="body"><aside class="nav">${tree([area], 0)}</aside><main>${head(d)}<div class="grid">${d.widgets.map(cell).join('')}</div></main></div>` : emptyState()}</div>`;
+}
+
+// Variant C: icon rail of Areas, local nav (parent + children only), a cross-Area "Recent changes" feed, and a Home overview.
+function VariantC(d) {
+  const leaves = (ws, dash) => ws.flatMap(w => w.children ? leaves(w.children, dash) : [{ w, dash }]);
+  const feed = DASH.flatMap(x => leaves(x.widgets, x)).sort((a, b) => b.w.updatedAt - a.w.updatedAt).slice(0, 12);
+  const area = d && chain(d)[0];
+  const local = d ? `${d.parent ? `<a href="${path(byId[d.parent])}">↑ ${byId[d.parent].title}</a><hr style="border:0;border-top:1px solid var(--line)">` : ''}
+    <a class="on" href="${path(d)}">${d.icon || '📄'} ${d.title}</a>${kids(d.id).map(k => `<a style="padding-left:22px" href="${path(k)}">${k.icon || '📄'} ${k.title} <span class="muted">${kids(k.id).length ? '· ' + kids(k.id).length + ' inside' : ''}</span></a>`).join('')}`
+    : areas().map(a => `<a href="${path(a)}">${a.icon} ${a.title}</a>`).join('');
+  const home = `<h1>Home</h1><div class="muted" style="margin:4px 0 20px">${areas().length} Areas</div><div class="areas">${areas().map(a => {
+    const k = leaves(a.widgets, a).find(x => x.w.type === 'kpi');
+    return `<a class="w" href="${path(a)}"><h2>${a.icon} ${a.title}</h2><div class="muted">${a.desc || ''}</div>${k ? `<div style="margin-top:10px"><span class="muted">${k.w.title}</span>${body(k.w)}</div>` : ''}<div class="muted">${kids(a.id).length} Dashboards · updated ${ago(a.updatedAt)}</div></a>`; }).join('')}</div>`;
+  if (!DASH.length) return `<div style="display:block">${emptyState()}</div>`;
+  return `<div class="C"><nav class="rail"><a class="${!d ? 'on' : ''}" href="#/" title="Home">🏠</a>${areas().map(a => `<a class="${a === area ? 'on' : ''}" href="${path(a)}" title="${a.title}">${a.icon}</a>`).join('')}</nav>
+    <aside class="local nav">${local}</aside>
+    <main>${d ? head(d) + `<div class="stack">${d.widgets.map(w => widget(w, { ts: false })).join('')}</div>` : home}</main>
+    <aside class="feed"><h2>Recent changes</h2>${feed.map(({ w, dash }) => `<div class="${flashId === w.id ? 'new' : ''}"><a href="${path(dash)}"><b>${w.title || w.type}</b></a><br><span class="muted">${dash.icon || ''} ${dash.title} · ${ago(w.updatedAt)}</span></div>`).join('')}</aside></div>`;
+}
+
+const VARIANTS = { A: ['Tree sidebar', VariantA], B: ['Area tabs + grid', VariantB], C: ['Rail + feed + home', VariantC] };
+const params = () => new URLSearchParams(location.search);
+const setParam = (k, v) => { const p = params(); v == null ? p.delete(k) : p.set(k, v); history.replaceState(null, '', '?' + p + location.hash); render(); };
+const FULL = [...DASH];
+
+function render() {
+  const p = params(), v = VARIANTS[p.get('variant')] ? p.get('variant') : 'A';
+  DASH.length = 0; if (p.get('empty') !== '1') DASH.push(...FULL);
+  let d = DASH.length ? current() : null;
+  if (!d && v !== 'C' && DASH.length) d = areas()[0];
+  document.getElementById('app').innerHTML = VARIANTS[v][1](d);
+  document.getElementById('lbl').textContent = `${v}: ${VARIANTS[v][0]}`;
+  document.getElementById('emp').textContent = p.get('empty') === '1' ? 'Show data' : 'Show empty';
+}
+const cycle = s => { const k = Object.keys(VARIANTS), v = params().get('variant') || 'A'; setParam('variant', k[(k.indexOf(v) + s + k.length) % k.length]); };
+document.getElementById('prev').onclick = () => cycle(-1);
+document.getElementById('next').onclick = () => cycle(1);
+document.getElementById('emp').onclick = () => setParam('empty', params().get('empty') === '1' ? null : '1');
+document.getElementById('write').onclick = () => {
+  // Simulates an Agent appending a weight row: both Weight Widgets update, the Health Dashboard bumps updatedAt.
+  const hea = byId.hea, all = []; (function walk(ws) { ws.forEach(w => { if (w.config.live) all.push(w); if (w.children) walk(w.children); }); })(hea.widgets);
+  const next = +(all[0].config.series.at(-1) + (Math.random() - 0.6)).toFixed(1);
+  all.forEach(w => { w.config.series.push(next); if (w.config.x) w.config.x.push('Nov ' + w.config.x.length); w.updatedAt = Date.now(); });
+  hea.updatedAt = Date.now(); flashId = all[1].id; render(); setTimeout(() => { flashId = null; }, 2000);
+};
+addEventListener('keydown', e => { if (e.target.closest('input,textarea,[contenteditable]')) return; if (e.key === 'ArrowLeft') cycle(-1); if (e.key === 'ArrowRight') cycle(1); });
+addEventListener('hashchange', render);
+render();
+</script>
+</body>
+</html>
