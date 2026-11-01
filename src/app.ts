@@ -4,9 +4,13 @@ import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
 import pkg from "../package.json" with { type: "json" };
 
+/** The name and version that the MCP server reports to a client. */
 export const serverInfo = { name: pkg.name, version: pkg.version };
 
-/** Builds the HTTP app: MCP at `/mcp`, the built web UI from `webRoot` (an absolute path). */
+/**
+ * Creates the HTTP app, with MCP at `/mcp` and the web UI from `webRoot`, an absolute path. `close`
+ * stops the MCP handler.
+ */
 export function createApp(webRoot: string) {
   const mcp = createMcpHandler(() => new McpServer(serverInfo), {
     onerror: (error) => console.error(error),
@@ -15,7 +19,7 @@ export function createApp(webRoot: string) {
   app.all("/mcp", (c) => mcp.fetch(c.req.raw));
   app.use("/*", serveStatic({ root: webRoot }));
   const indexHtml = serveStatic({ path: join(webRoot, "index.html") });
-  // A missing file (stale hashed asset) must 404; only client-side routes get index.html.
+  // A path with a file extension is a missing asset and gets a 404. Only a client-side route gets `index.html`.
   app.use("*", async (c, next) => (extname(c.req.path) ? c.notFound() : indexHtml(c, next)));
   return { app, close: mcp.close };
 }

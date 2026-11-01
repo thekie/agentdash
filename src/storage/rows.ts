@@ -5,7 +5,6 @@ import { assertNoIssues, assertVersion, type Issue, type Path, StorageError } fr
 import { assertStoreLive, findStore, liveColumns, type StoreRow, tableOf } from "./stores.ts";
 import { formatValue, parseValue, type StoredValue } from "./values.ts";
 
-/** The most rows one append or update may carry. */
 const MAX_BATCH = 1000;
 
 const RowRecord = z
@@ -19,13 +18,13 @@ const RowRecord = z
   .catchall(z.union([z.string(), z.number(), z.null()]));
 type RowRecord = z.infer<typeof RowRecord>;
 
-export interface Row {
+interface Row {
   id: number;
   version: number;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
-  /** Live columns by key, in the Agent's value forms. */
+  /** The value of each live column by key, in the form that an Agent writes. */
   values: Record<string, unknown>;
 }
 
@@ -37,7 +36,7 @@ function toRow(store: StoreRow, record: RowRecord): Row {
   return { id, version, createdAt, updatedAt, archivedAt, values };
 }
 
-/** Physical column name to stored value. */
+/** Maps the physical name of a column to its stored value. */
 type StoredValues = Map<string, StoredValue>;
 
 function parseValues(
@@ -127,25 +126,25 @@ function writableStore(db: Database, ref: string): StoreRow {
   return store;
 }
 
-/** What to do with an appended row whose Key matches a live row. */
-export type OnConflict = "error" | "update" | "skip";
+/** Describes what an append does with a row whose Key matches a live row. */
+type OnConflict = "error" | "update" | "skip";
 
-export interface AppendRowsInput {
+interface AppendRowsInput {
   store: string;
   rows: Record<string, unknown>[];
   onConflict?: OnConflict | undefined;
 }
 
-export interface AppendResult {
+interface AppendResult {
   inserted: number[];
   updated: number[];
   skipped: number[];
 }
 
 /**
- * Appends rows; run it inside a transaction so a failure writes none. A row whose Key matches a live row follows `onConflict`: `error`
- * (the default) fails with `conflict` listing the matching rows, `update` overwrites the given
- * values, `skip` leaves the row as it is. Fails with `invalid` listing every bad value.
+ * Appends rows and applies `onConflict` to each row whose Key matches a live row. Throws
+ * `StorageError` `invalid` with every bad value, or `conflict` with every match if `onConflict` is
+ * `error`. Run it in a transaction, because it can write rows before it throws.
  */
 export function appendRows(db: Database, input: AppendRowsInput, now: string): AppendResult {
   assertBatchSize(input.rows.length);
@@ -173,8 +172,10 @@ export function appendRows(db: Database, input: AppendRowsInput, now: string): A
   return result;
 }
 
-/** An appended row whose Key matches a stored row, or an earlier row of the same batch. */
-export type KeyConflict = { index: number; row: Row } | { index: number; sameKeyAsIndex: number };
+/**
+ * Describes an appended row whose Key matches a stored row or an earlier row of the same append.
+ */
+type KeyConflict = { index: number; row: Row } | { index: number; sameKeyAsIndex: number };
 
 function keyConflict(index: number, match: Row, insertedBy: Map<number, number>): KeyConflict {
   const earlier = insertedBy.get(match.id);
@@ -225,16 +226,17 @@ function rowAtVersion(
   return record;
 }
 
-export interface RowUpdate {
+interface RowUpdate {
   id: number;
   expectedVersion: number;
-  /** Only the columns to change. */
+  /** The new values of the columns to change. The other columns keep their values. */
   values: Record<string, unknown>;
 }
 
 /**
- * Changes the given values of live rows; run it inside a transaction so a failure writes none.
- * Fails with `conflict` on a stale version or a duplicate Key, and `archived` on an Archived row.
+ * Writes the given values of live rows. Throws `StorageError` `conflict` if a version is stale or
+ * two rows would share a Key, and `archived` if a row is Archived. Run it in a transaction, because
+ * it can write rows before it throws.
  */
 export function updateRows(
   db: Database,
@@ -261,7 +263,7 @@ export function updateRows(
   });
 }
 
-export interface RowRef {
+interface RowRef {
   store: string;
   id: number;
   expectedVersion: number;
@@ -286,12 +288,12 @@ function setRowArchivedAt(
   return toRow(store, { ...record, archivedAt, version: record.version + 1, updatedAt: now });
 }
 
-/** Archives a row. Archiving it again changes nothing. */
+/** Archives a row. If the row is already Archived, nothing changes. */
 export function archiveRow(db: Database, input: RowRef, now: string): Row {
   return setRowArchivedAt(db, input, now, now);
 }
 
-/** Restores an Archived row. Fails with `conflict` when a live row took its Key. */
+/** Restores an Archived row. Throws `StorageError` `conflict` if a live row has its Key. */
 export function restoreRow(db: Database, input: RowRef, now: string): Row {
   return setRowArchivedAt(db, input, null, now);
 }
@@ -303,12 +305,12 @@ function rowsWhere(db: Database, ref: string, archivedAt: "IS NULL" | "IS NOT NU
     .map((record) => toRow(store, record));
 }
 
-/** The live rows of a Data Store, by id or name, in insertion order. */
+/** Returns the live rows of a Data Store, found by id or name, in insertion order. */
 export function liveRows(db: Database, ref: string): Row[] {
   return rowsWhere(db, ref, "IS NULL");
 }
 
-/** The Archived rows of a Data Store, by id or name, in insertion order. */
+/** Returns the Archived rows of a Data Store, found by id or name, in insertion order. */
 export function archivedRows(db: Database, ref: string): Row[] {
   return rowsWhere(db, ref, "IS NOT NULL");
 }

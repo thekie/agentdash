@@ -49,13 +49,17 @@ CREATE TABLE stores (
 CREATE UNIQUE INDEX storesLiveName ON stores(name) WHERE archivedAt IS NULL;
 `;
 
-/** Each entry upgrades the database by one `user_version`. Append, never edit. */
+/**
+ * Each entry upgrades the database by one `user_version`. A database never runs an entry twice, so
+ * a schema change needs a new entry.
+ */
 const migrations = [schema];
 
+/** Describes a connection to the SQLite database. */
 export interface Database {
-  /** Runs a statement and returns the rows parsed by `row`. */
+  /** Returns every row of the statement, parsed by `row`. */
   all<T extends z.ZodType>(row: T, sql: string, ...params: SQLInputValue[]): z.output<T>[];
-  /** Runs a statement and returns the first row parsed by `row`, if any. */
+  /** Returns the first row of the statement parsed by `row`, or `undefined` if there is none. */
   one<T extends z.ZodType>(
     row: T,
     sql: string,
@@ -63,14 +67,17 @@ export interface Database {
   ): z.output<T> | undefined;
   run(sql: string, ...params: SQLInputValue[]): void;
   exec(sql: string): void;
-  /** Runs `body` atomically: everything it wrote is rolled back if it throws. */
+  /** Runs `body` atomically. If `body` throws, everything that it wrote is rolled back. */
   transaction<T>(body: () => T): T;
-  /** Runs `body` and then rolls back everything it wrote, returning what it returned. */
+  /** Runs `body`, rolls back everything that it wrote, and returns the result of `body`. */
   rehearse<T>(body: () => T): T;
   close(): void;
 }
 
-/** Opens or creates the SQLite file at `path` (or `:memory:`) and brings its schema up to date. */
+/**
+ * Opens the SQLite file at `path`, or creates it, and runs the migrations that it has not run. The
+ * path `:memory:` opens a database that is not stored.
+ */
 export function openDatabase(path: string): Database {
   const sqlite = new DatabaseSync(path);
   sqlite.exec("PRAGMA journal_mode = WAL");
@@ -121,12 +128,15 @@ function migrate(sqlite: DatabaseSync): void {
   }
 }
 
-/** A new stable id such as `d_k3v9x2m7q1`. Lowercase letters and digits only, so it is safe in SQL identifiers. */
+/**
+ * Returns a new id with the given prefix, for example `d_0k3v9x2m7q1ab`. The id holds only
+ * lowercase letters, digits and `_`.
+ */
 export function createId(prefix: "d" | "w" | "s"): string {
   return `${prefix}_${randomBytes(8).readBigUInt64BE().toString(36).padStart(13, "0").slice(0, 13)}`;
 }
 
-/** Quotes an identifier for SQL. Identifiers come only from ids and physical column names. */
+/** Returns `name` quoted as an SQL identifier. */
 export function quoteId(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;
 }

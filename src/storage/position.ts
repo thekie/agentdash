@@ -1,9 +1,9 @@
-/** Where an item goes among its siblings. Anchors, never indexes, so concurrent inserts don't race. */
+/** Describes where an item goes among its siblings: first, last, or next to a sibling. */
 export type Position = "first" | "last" | { before: string } | { after: string };
 
 /**
- * Returns the sibling ids in their new order with `id` placed at `position`, moving it if it was
- * already among them. Returns `undefined` when the anchor is not a sibling.
+ * Returns the ids of the siblings in their new order, with `id` at `position`. If `id` is already a
+ * sibling, it moves. Returns `undefined` if the anchor is not a sibling.
  */
 export function placeAt(siblings: string[], id: string, position: Position): string[] | undefined {
   const others = siblings.filter((s) => s !== id);

@@ -37,10 +37,11 @@ const WidgetRow = z.object({
 });
 type WidgetRow = z.infer<typeof WidgetRow>;
 
+/** Describes a Dashboard. A Dashboard with no parent is an Area. */
 export interface Dashboard {
   id: string;
   parentId: string | null;
-  /** Slugs from the Area down, joined by `/`. Agents may address a Dashboard by it. */
+  /** The slugs from the Area down to this Dashboard, joined by `/`. */
   path: string;
   slug: string;
   title: string;
@@ -52,14 +53,16 @@ export interface Dashboard {
   archivedAt: string | null;
 }
 
-export interface DashboardSummary
-  extends Pick<Dashboard, "id" | "parentId" | "path" | "title" | "icon"> {
+interface DashboardSummary extends Pick<Dashboard, "id" | "parentId" | "path" | "title" | "icon"> {
   widgetCount: number;
   childCount: number;
 }
 
-/** A Widget as an Agent writes it, with its whole subtree. `config` and `projection` are JSON. */
-export interface WidgetInput {
+/**
+ * Describes a Widget as an Agent writes it, with its whole subtree. `config` and `projection` are
+ * stored as JSON.
+ */
+interface WidgetInput {
   type: string;
   title?: string | undefined;
   config: unknown;
@@ -67,6 +70,7 @@ export interface WidgetInput {
   children?: WidgetInput[] | undefined;
 }
 
+/** Describes a live Widget with its live children. */
 export interface Widget {
   id: string;
   type: string;
@@ -79,14 +83,14 @@ export interface Widget {
   children: Widget[];
 }
 
-export interface DashboardWithWidgets extends Dashboard {
+interface DashboardWithWidgets extends Dashboard {
   widgets: Widget[];
 }
 
-/** Where a Widget sits: directly on a Dashboard (by id or path) or inside a layout Widget. */
-export type WidgetParent = { dashboard: string } | { widget: string };
+/** Describes where a Widget is: on a Dashboard, found by id or path, or in a layout Widget. */
+type WidgetParent = { dashboard: string } | { widget: string };
 
-/** Every Dashboard and Widget, read whole on each call. */
+/** Holds every Dashboard and Widget. Each call reads the whole tree. */
 interface Tree {
   dashboards: Map<string, DashboardRow>;
   widgets: Map<string, WidgetRow>;
@@ -135,7 +139,7 @@ function findWidget(tree: Tree, id: string): WidgetRow {
   return found;
 }
 
-/** The nearest Archived Dashboard at or above `row`. */
+/** Returns the nearest Archived Dashboard at or above `row`, or `undefined` if there is none. */
 function archivedDashboardAbove(
   tree: Tree,
   row: DashboardRow | undefined,
@@ -149,7 +153,10 @@ function archivedDashboardAbove(
 
 type Archived = { kind: "Dashboard"; row: DashboardRow } | { kind: "Widget"; row: WidgetRow };
 
-/** The nearest Archived Widget or Dashboard at or above `row`. */
+/**
+ * Returns the nearest Archived Widget or Dashboard at or above `row`, or `undefined` if there is
+ * none.
+ */
 function archivedAbove(tree: Tree, row: WidgetRow): Archived | undefined {
   if (row.archivedAt !== null) return { kind: "Widget", row };
   const parent = row.parentId === null ? undefined : tree.widgets.get(row.parentId);
@@ -187,8 +194,8 @@ function writeOrder(db: Database, table: "dashboards" | "widgets", ids: string[]
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-/** Lowercase ASCII words joined by `-`, from a title. */
-export function slugFrom(title: string): string {
+/** Returns the title as lowercase ASCII words joined by `-`. */
+function slugFrom(title: string): string {
   const slug = title
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
@@ -212,8 +219,8 @@ function assertSlugFree(tree: Tree, slug: string, parentId: string | null, self?
   }
 }
 
-export interface CreateDashboardInput {
-  /** The parent Dashboard by id or path. Omit to create an Area. */
+interface CreateDashboardInput {
+  /** The id or path of the parent Dashboard. Without it, the new Dashboard is an Area. */
   parent?: string | undefined;
   title: string;
   slug?: string | undefined;
@@ -223,8 +230,9 @@ export interface CreateDashboardInput {
 }
 
 /**
- * Creates a Dashboard, or an Area when there is no parent. The slug defaults to one made from the
- * title. Fails with `conflict` when a sibling has the slug, returning that sibling.
+ * Creates a Dashboard, or an Area if `parent` is not given. Without a `slug`, the slug comes from
+ * the title. Throws `StorageError` `conflict` with the sibling if a live sibling has the slug, and
+ * `archived` if the parent is Archived.
  */
 export function createDashboard(db: Database, input: CreateDashboardInput, now: string): Dashboard {
   const tree = treeOf(db);
@@ -256,7 +264,7 @@ function dashboardById(db: Database, id: string): Dashboard {
   return toDashboard(tree, findDashboard(tree, id));
 }
 
-export interface UpdateDashboardInput {
+interface UpdateDashboardInput {
   id: string;
   expectedVersion: number;
   title?: string | undefined;
@@ -265,7 +273,10 @@ export interface UpdateDashboardInput {
   description?: string | null | undefined;
 }
 
-/** Changes the given fields of a Dashboard. A new title keeps the old slug. */
+/**
+ * Changes the given fields of a Dashboard. A new title keeps the old slug. Throws `StorageError`
+ * `conflict` if a sibling has the new slug.
+ */
 export function updateDashboard(db: Database, input: UpdateDashboardInput, now: string): Dashboard {
   const tree = treeOf(db);
   const row = findDashboard(tree, input.id);
@@ -305,7 +316,11 @@ function toWidget(tree: Tree, row: WidgetRow): Widget {
   return { id, type, title, config, projection, version, createdAt, updatedAt, children };
 }
 
-/** Returns a live Dashboard by id or path with its live Widget tree. Fails with `archived` when it or an ancestor is Archived. */
+/**
+ * Returns a live Dashboard by id or path, with its live Widget tree. Throws `StorageError`
+ * `archived` if the Dashboard or an ancestor is Archived, and `not_found` if there is no such
+ * Dashboard.
+ */
 export function dashboardWithWidgets(db: Database, ref: string): DashboardWithWidgets {
   const tree = treeOf(db);
   const row = findDashboard(tree, ref);
@@ -332,7 +347,10 @@ function summaries(tree: Tree, row: DashboardRow): DashboardSummary[] {
   return [summary, ...children.flatMap((child) => summaries(tree, child))];
 }
 
-/** Every live Dashboard, depth first in sibling order, with Widget and child counts. */
+/**
+ * Returns every live Dashboard, depth first in sibling order, with its number of Widgets and
+ * children.
+ */
 export function treeSummaries(db: Database): DashboardSummary[] {
   const tree = treeOf(db);
   return liveChildren(tree, null).flatMap((area) => summaries(tree, area));
@@ -384,13 +402,16 @@ function insertWidget(
   return id;
 }
 
-export interface AddWidgetInput {
+interface AddWidgetInput {
   parent: WidgetParent;
   widget: WidgetInput;
   position?: Position | undefined;
 }
 
-/** Adds a Widget with its whole subtree. The parent's version does not change. */
+/**
+ * Adds a Widget with its whole subtree. The version of the parent does not change. Throws
+ * `StorageError` `archived` if the parent is Archived.
+ */
 export function addWidget(db: Database, input: AddWidgetInput, now: string): Widget {
   const tree = treeOf(db);
   const container = resolveContainer(tree, input.parent);
@@ -405,7 +426,7 @@ function widgetById(db: Database, id: string): Widget {
   return toWidget(tree, findWidget(tree, id));
 }
 
-export interface UpdateWidgetInput {
+interface UpdateWidgetInput {
   id: string;
   expectedVersion: number;
   title?: string | undefined;
@@ -413,7 +434,7 @@ export interface UpdateWidgetInput {
   projection?: unknown;
 }
 
-/** Replaces a Widget's own title, config and Projection. Its children stay as they are. */
+/** Replaces the title, config and Projection of a Widget. Its children do not change. */
 export function updateWidget(db: Database, input: UpdateWidgetInput, now: string): Widget {
   const tree = treeOf(db);
   const row = findWidget(tree, input.id);
@@ -441,22 +462,25 @@ function isDashboardWithin(tree: Tree, row: DashboardRow | undefined, ancestorId
   );
 }
 
-export interface MoveInput {
+interface MoveInput {
   id: string;
   expectedVersion: number;
   position?: Position | undefined;
 }
 
-export interface MoveDashboardInput extends MoveInput {
-  /** The new parent by id or path, or `null` to make the Dashboard an Area. */
+interface MoveDashboardInput extends MoveInput {
+  /** The id or path of the new parent, or `null` to make the Dashboard an Area. */
   parent: string | null;
 }
 
-export interface MoveWidgetInput extends MoveInput {
+interface MoveWidgetInput extends MoveInput {
   parent: WidgetParent;
 }
 
-/** Moves a Dashboard under another (by id or path), or to the top level as an Area when `parent` is `null`. */
+/**
+ * Moves a Dashboard to a new parent. Throws `StorageError` `invalid` if the parent is the Dashboard
+ * or under it, and `conflict` if a sibling there has its slug.
+ */
 export function moveDashboard(db: Database, input: MoveDashboardInput, now: string): Dashboard {
   const tree = treeOf(db);
   const row = findDashboard(tree, input.id);
@@ -491,7 +515,10 @@ function isWidgetWithin(tree: Tree, row: WidgetRow | undefined, ancestorId: stri
   );
 }
 
-/** Moves a Widget with its subtree onto a Dashboard or into a layout Widget, possibly on another Dashboard. */
+/**
+ * Moves a Widget with its subtree to a Dashboard or a layout Widget, on any Dashboard. Throws
+ * `StorageError` `invalid` if the target is the Widget or under it.
+ */
 export function moveWidget(db: Database, input: MoveWidgetInput, now: string): Widget {
   const tree = treeOf(db);
   const row = findWidget(tree, input.id);
@@ -517,6 +544,7 @@ export function moveWidget(db: Database, input: MoveWidgetInput, now: string): W
   return widgetById(db, row.id);
 }
 
+/** Describes an entity by its id and the version that the caller last read. */
 export interface VersionedRef {
   id: string;
   expectedVersion: number;
@@ -537,7 +565,10 @@ function setArchivedAt(
   );
 }
 
-/** Archives a Dashboard and so everything under it. Archiving it again changes nothing. */
+/**
+ * Archives a Dashboard, which hides everything under it. If it is already Archived, nothing
+ * changes.
+ */
 export function archiveDashboard(db: Database, input: VersionedRef, now: string): Dashboard {
   const tree = treeOf(db);
   const row = findDashboard(tree, input.id);
@@ -549,8 +580,9 @@ export function archiveDashboard(db: Database, input: VersionedRef, now: string)
 }
 
 /**
- * Restores an Archived Dashboard with the subtree it Archived, as the last of its siblings. Fails with `conflict` when a live
- * sibling took its slug, and with `archived` while an ancestor is still Archived.
+ * Restores an Archived Dashboard and everything under it, as the last of its siblings. Throws
+ * `StorageError` `conflict` if a live sibling has its slug, and `archived` if an ancestor is
+ * Archived.
  */
 export function restoreDashboard(db: Database, input: VersionedRef, now: string): Dashboard {
   const tree = treeOf(db);
@@ -565,7 +597,7 @@ export function restoreDashboard(db: Database, input: VersionedRef, now: string)
   return dashboardById(db, row.id);
 }
 
-/** Archives a Widget and its subtree. Archiving it again changes nothing. */
+/** Archives a Widget, which hides its subtree. If it is already Archived, nothing changes. */
 export function archiveWidget(db: Database, input: VersionedRef, now: string): Widget {
   const tree = treeOf(db);
   const row = findWidget(tree, input.id);
@@ -576,7 +608,10 @@ export function archiveWidget(db: Database, input: VersionedRef, now: string): W
   return widgetById(db, row.id);
 }
 
-/** Restores an Archived Widget with its subtree, as the last of its siblings. Fails with `archived` while an ancestor is still Archived. */
+/**
+ * Restores an Archived Widget and its subtree, as the last of its siblings. Throws `StorageError`
+ * `archived` if an ancestor is Archived.
+ */
 export function restoreWidget(db: Database, input: VersionedRef, now: string): Widget {
   const tree = treeOf(db);
   const row = findWidget(tree, input.id);
@@ -589,14 +624,17 @@ export function restoreWidget(db: Database, input: VersionedRef, now: string): W
   return widgetById(db, row.id);
 }
 
-export interface ArchivedItem {
+interface ArchivedItem {
   id: string;
   title: string | null;
   archivedAt: string;
   version: number;
 }
 
-/** Dashboards and Widgets Archived directly, not those hidden only because an ancestor is. */
+/**
+ * Returns the Dashboards and Widgets that are Archived themselves. Items under an Archived ancestor
+ * are not listed.
+ */
 export function archivedTreeItems(db: Database): {
   dashboards: ArchivedItem[];
   widgets: ArchivedItem[];

@@ -25,15 +25,15 @@ import {
   updateWidget,
 } from "./tree.ts";
 
-export interface StorageOptions {
-  /** The current time as an ISO string. Defaults to the system clock. */
+interface StorageOptions {
+  /** Returns the current time as an ISO string. The default reads the system clock. */
   now?: () => string;
 }
 
 /**
- * Opens agentdash's SQLite database at `path` (`:memory:` for tests) and returns every read and
- * write on Dashboards, Widgets, Data Stores and rows. Each write is atomic. Failures an Agent can
- * act on throw `StorageError`.
+ * Opens the SQLite database at `path` and returns the reads and writes on Dashboards, Widgets, Data
+ * Stores and rows. Each write is atomic. A write throws `StorageError` for a failure that an Agent
+ * can correct.
  */
 export function createStorage(path: string, options: StorageOptions = {}) {
   const db = openDatabase(path);
@@ -71,10 +71,14 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     archiveRow: write(archiveRow),
     restoreRow: write(restoreRow),
 
-    /** Everything Archived directly, so an Agent can find it and restore it. */
+    /**
+     * Returns the Dashboards, Widgets and Data Stores that are Archived themselves, without the
+     * items under them.
+     */
     archived: () => ({ ...archivedTreeItems(db), stores: archivedStores(db) }),
     close: () => db.close(),
   };
 }
 
+/** Describes the object that `createStorage` returns. */
 export type Storage = ReturnType<typeof createStorage>;

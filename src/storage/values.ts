@@ -1,10 +1,10 @@
 import { z } from "zod";
 import type { ColumnType, EnumOption } from "./columns.ts";
 
-/** A value as SQLite holds it in a Data Store table. */
+/** Describes a value as the table of a Data Store holds it. */
 export type StoredValue = string | number | null;
 
-export type ParsedValue =
+type ParsedValue =
   | { ok: true; stored: StoredValue }
   | { ok: false; expected: string; validValues?: string[] };
 
@@ -12,7 +12,7 @@ interface Codec {
   sqlType: "TEXT" | "REAL" | "INTEGER";
   expected: string;
   validValues?: string[];
-  /** Returns the stored form, or `undefined` when the value does not fit the type. */
+  /** Returns the stored form, or `undefined` if the value does not fit the type. */
   parse(value: unknown): StoredValue | undefined;
   format(stored: string | number): unknown;
 }
@@ -24,7 +24,10 @@ function isDate(value: unknown): value is string {
   return new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
 }
 
-/** Converts a decimal in major units to integer minor units, refusing extra decimals. */
+/**
+ * Returns a decimal in major units as integer minor units, or `undefined` if it has more than
+ * `digits` decimals.
+ */
 function minorUnits(value: unknown, digits: number): number | undefined {
   if (typeof value !== "number" && typeof value !== "string") return undefined;
   const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value));
@@ -100,12 +103,15 @@ function codecOf(column: ColumnType): Codec {
   }
 }
 
-/** The SQLite type that holds values of this column type in a STRICT table. */
+/** Returns the SQLite type that holds the values of the column type in a `STRICT` table. */
 export function sqlTypeOf(column: ColumnType): Codec["sqlType"] {
   return codecOf(column).sqlType;
 }
 
-/** Checks an Agent's value against the column type and returns its stored form. `null` is always allowed. */
+/**
+ * Returns the stored form of a value that an Agent wrote, or the expected form if the value does
+ * not fit the column type. `null` fits every column type.
+ */
 export function parseValue(column: ColumnType, value: unknown): ParsedValue {
   if (value === null) return { ok: true, stored: null };
   const codec = codecOf(column);
@@ -115,12 +121,15 @@ export function parseValue(column: ColumnType, value: unknown): ParsedValue {
   return codec.validValues ? { ...failure, validValues: codec.validValues } : failure;
 }
 
-/** Returns the value as Agents read and write it: money in major units, enums by label. */
+/**
+ * Returns a stored value in the form that Agents read and write: money in major units, and enums by
+ * label.
+ */
 export function formatValue(column: ColumnType, stored: StoredValue): unknown {
   return stored === null ? null : codecOf(column).format(stored);
 }
 
-/** Readings of a value to try, in order, when it moves to another column type. */
+/** Returns the forms of a value to try, in order, when its column changes type. */
 function retypeCandidates(value: unknown): unknown[] {
   if (typeof value !== "string") return [value, String(value)];
   const candidates: unknown[] = [value];
@@ -131,10 +140,7 @@ function retypeCandidates(value: unknown): unknown[] {
   return candidates;
 }
 
-/**
- * Converts a stored value from one column type to another. Returns `undefined` when it does not
- * convert, which a retype stores as empty.
- */
+/** Returns the stored value converted to the type `to`, or `undefined` if it does not convert. */
 export function retypeValue(
   from: ColumnType,
   to: ColumnType,

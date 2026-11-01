@@ -1,8 +1,9 @@
-export type ErrorCode = "not_found" | "invalid" | "conflict" | "archived";
+type ErrorCode = "not_found" | "invalid" | "conflict" | "archived";
 
-/** Where in the Agent's input a problem is, such as `["rows", 3, "amount"]`. */
+/** Describes where a problem is in the input of an Agent, for example `["rows", 3, "amount"]`. */
 export type Path = (string | number)[];
 
+/** Describes one problem in the input of an Agent. */
 export interface Issue {
   path: Path;
   problem: string;
@@ -10,14 +11,14 @@ export interface Issue {
   validValues?: string[];
 }
 
-export interface ErrorDetails {
+interface ErrorDetails {
   issues?: Issue[];
-  /** The entity as stored now, so the Agent can merge and retry without another read. */
+  /** The stored state that caused a `conflict`. */
   current?: unknown;
   hint?: string;
 }
 
-/** A failure an Agent can recover from. The MCP tools turn it into an `isError` result. */
+/** Represents a failure that an Agent can correct before it tries the call again. */
 export class StorageError extends Error {
   readonly code: ErrorCode;
   readonly details: ErrorDetails;
@@ -29,12 +30,15 @@ export class StorageError extends Error {
   }
 }
 
-/** Throws `invalid` listing every issue, when there is at least one. */
+/** Throws `StorageError` `invalid` with all of `issues` if the list is not empty. */
 export function assertNoIssues(issues: Issue[], message: string): void {
   if (issues.length > 0) throw new StorageError("invalid", message, { issues });
 }
 
-/** Throws `conflict` carrying the entity's current state when its version is not `expectedVersion`. */
+/**
+ * Throws `StorageError` `conflict` with the result of `current` if the version of `entity` is not
+ * `expectedVersion`.
+ */
 export function assertVersion(
   entity: { version: number },
   expectedVersion: number,

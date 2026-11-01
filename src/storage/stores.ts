@@ -25,15 +25,16 @@ const StoreRow = z.object({
   updatedAt: z.string(),
   archivedAt: z.string().nullable(),
 });
+/** Describes a Data Store as the `stores` table holds it, with its columns and Key parsed. */
 export type StoreRow = z.infer<typeof StoreRow>;
 
-export interface DataStore {
+interface DataStore {
   id: string;
   name: string;
-  /** Live columns in order. */
+  /** The live columns, in order. */
   columns: Column[];
   archivedColumns: Column[];
-  /** Keys of the Key columns; empty when the Data Store has no Key. */
+  /** The keys of the Key columns. The list is empty if the Data Store has no Key. */
   key: string[];
   rowCount: number;
   version: number;
@@ -42,12 +43,12 @@ export interface DataStore {
   archivedAt: string | null;
 }
 
-/** The SQL table holding a Data Store's rows. */
+/** Returns the quoted name of the table that holds the rows of a Data Store. */
 export function tableOf(store: { id: string }): string {
   return quoteId(`ds_${store.id}`);
 }
 
-/** The columns that are not Archived, in order. */
+/** Returns the columns that are not Archived, in order. */
 export function liveColumns(store: StoreRow): Column[] {
   return store.columns.filter((c) => c.archivedAt === undefined);
 }
@@ -59,14 +60,17 @@ function storeRow(db: Database, ref: string): StoreRow | undefined {
   );
 }
 
-/** Finds a Data Store by id or live name. Fails with `not_found`. */
+/**
+ * Returns the Data Store with the id, or the live Data Store with the name. Throws `StorageError`
+ * `not_found` if there is none.
+ */
 export function findStore(db: Database, ref: string): StoreRow {
   const store = storeRow(db, ref);
   if (!store) throw new StorageError("not_found", `No Data Store with id or name "${ref}"`);
   return store;
 }
 
-/** Fails with `archived` when the Data Store is Archived. */
+/** Throws `StorageError` `archived` if the Data Store is Archived. */
 export function assertStoreLive(store: StoreRow): void {
   if (store.archivedAt !== null) {
     throw new StorageError(
@@ -76,7 +80,7 @@ export function assertStoreLive(store: StoreRow): void {
   }
 }
 
-export function toDataStore(db: Database, store: StoreRow): DataStore {
+function toDataStore(db: Database, store: StoreRow): DataStore {
   const count = db.one(
     z.object({ n: z.number() }),
     `SELECT count(*) AS n FROM ${tableOf(store)} WHERE archivedAt IS NULL`,
@@ -96,7 +100,7 @@ export function toDataStore(db: Database, store: StoreRow): DataStore {
   };
 }
 
-/** Fails with `conflict` when another live Data Store has the name, returning that Data Store. */
+/** Throws `StorageError` `conflict` with the other Data Store if a live Data Store has the name. */
 function assertNameFree(db: Database, name: string, self?: string): void {
   const taken = db.one(
     StoreRow,
@@ -118,7 +122,10 @@ function duplicateKeyIssues(keys: string[], path: Path): Issue[] {
   );
 }
 
-/** The physical names of the given live column keys, reporting unknown keys as issues. */
+/**
+ * Returns the physical names of the columns with the given keys. Adds an issue to `issues` for each
+ * unknown key.
+ */
 function physicalNames(columns: Column[], keys: string[], path: Path, issues: Issue[]): string[] {
   return keys.flatMap((key, index) => {
     const column = columns.find((c) => c.key === key);
@@ -132,14 +139,17 @@ function physicalNames(columns: Column[], keys: string[], path: Path, issues: Is
   });
 }
 
-export interface CreateStoreInput {
+interface CreateStoreInput {
   name: string;
   columns: ColumnSpec[];
-  /** Column keys that identify a row. */
+  /** The keys of the columns that make up the Key. */
   key?: string[] | undefined;
 }
 
-/** Creates a Data Store. Fails with `conflict` when a live Data Store has the name, returning it. */
+/**
+ * Creates a Data Store and its table. Throws `StorageError` `conflict` with the existing Data Store
+ * if a live one has the name, and `invalid` if a column or the Key is not valid.
+ */
 export function createStore(db: Database, input: CreateStoreInput, now: string): DataStore {
   assertNameFree(db, input.name);
   const columns = z
@@ -175,19 +185,22 @@ export function createStore(db: Database, input: CreateStoreInput, now: string):
   return dataStore(db, id);
 }
 
-/** Returns a Data Store by id or live name. */
+/**
+ * Returns the Data Store with the id or live name. Throws `StorageError` `not_found` if there is
+ * none.
+ */
 export function dataStore(db: Database, ref: string): DataStore {
   return toDataStore(db, findStore(db, ref));
 }
 
-/** Every live Data Store, by name. */
+/** Returns every live Data Store, ordered by name. */
 export function liveStores(db: Database): DataStore[] {
   return db
     .all(StoreRow, "SELECT * FROM stores WHERE archivedAt IS NULL ORDER BY name")
     .map((store) => toDataStore(db, store));
 }
 
-export const AlterOp = z.discriminatedUnion("op", [
+const AlterOp = z.discriminatedUnion("op", [
   z.object({ op: z.literal("add_column"), column: ColumnSpec }),
   z.object({
     op: z.literal("rename_column"),
@@ -204,23 +217,29 @@ export const AlterOp = z.discriminatedUnion("op", [
     options: z.array(EnumOptionSpec).min(1),
   }),
 ]);
-export type AlterOp = z.input<typeof AlterOp>;
+type AlterOp = z.input<typeof AlterOp>;
 type ParsedAlterOp = z.output<typeof AlterOp>;
 
-export interface KeyDuplicate {
+interface KeyDuplicate {
   values: Record<string, unknown>;
   rowIds: number[];
 }
 
-export interface OpReport {
+interface OpReport {
   op: AlterOp["op"];
-  /** Live values a retype could not convert. They become empty. Lists at most 20 rows. */
+  /**
+   * The live values that a retype cannot convert. They become empty, and `rows` lists at most 20 of
+   * them.
+   */
   unconverted?: { count: number; rows: { id: number; value: unknown }[] };
-  /** Live rows sharing a Key, which block `set_key` and a retype of a Key column. */
+  /** The groups of live rows that share a Key after a `set_key` or a retype of a Key column. */
   keyDuplicates?: KeyDuplicate[];
 }
 
-/** The Data Store as the ops so far have changed it, with the database and time they write with. */
+/**
+ * Describes the Data Store as the ops change it, with the database and the time that the ops write
+ * with.
+ */
 interface Draft {
   db: Database;
   store: StoreRow;
@@ -253,7 +272,7 @@ const DuplicateRow = z
   .object({ ids: z.string() })
   .catchall(z.union([z.string(), z.number(), z.null()]));
 
-/** Live rows that share values in the given physical columns. */
+/** Returns the groups of live rows that share values in the columns of `key`. */
 function keyDuplicates(draft: Draft, key: string[]): KeyDuplicate[] {
   if (key.length === 0) return [];
   const columns = key.map((physical) => draft.store.columns.find((c) => c.physical === physical));
@@ -310,7 +329,7 @@ function retypeColumn(draft: Draft, key: string, to: ParsedColumnType, path: Pat
     `SELECT id, ${quoteId(from.physical)} AS value, archivedAt IS NULL AS isLive FROM ${table}`,
   )) {
     const value = retypeValue(from, column, row.value);
-    // Archived rows convert too, but only live rows are reported.
+    // Archived rows convert too. The report lists only live rows.
     if (value === undefined && row.isLive)
       unconverted.push({ id: row.id, value: formatValue(from, row.value) });
     draft.db.run(
@@ -385,15 +404,15 @@ function applyOp(draft: Draft, op: ParsedAlterOp, index: number): OpReport {
   }
 }
 
-export interface AlterStoreInput {
+interface AlterStoreInput {
   store: string;
   expectedVersion: number;
   ops: AlterOp[];
-  /** Report what the ops would do, and change nothing. */
+  /** If true, the ops run and are rolled back, and only the reports are returned. */
   dryRun?: boolean | undefined;
 }
 
-export interface AlterResult {
+interface AlterResult {
   store: DataStore;
   reports: OpReport[];
 }
@@ -414,9 +433,9 @@ function applyOps(db: Database, store: StoreRow, input: AlterStoreInput, now: st
 }
 
 /**
- * Applies schema ops in order. Run it inside a transaction: a failing op leaves earlier ones
- * applied until the caller rolls back. With `dryRun` it reports what they would do and changes
- * nothing. Fails with `conflict` when the ops leave live rows sharing a Key, listing them.
+ * Applies the ops in order and returns a report for each op, and rolls them back if `dryRun` is
+ * true. Throws `StorageError` `conflict` if live rows would share a Key, and `invalid` if an op is
+ * not valid. Run it in a transaction, because an op can fail after earlier ops are applied.
  */
 export function alterStore(db: Database, input: AlterStoreInput, now: string): AlterResult {
   const store = findStore(db, input.store);
@@ -434,12 +453,15 @@ export function alterStore(db: Database, input: AlterStoreInput, now: string): A
   return result;
 }
 
-/** Archives a Data Store. Archiving it again changes nothing. */
+/** Archives a Data Store. If it is already Archived, nothing changes. */
 export function archiveStore(db: Database, input: VersionedRef, now: string): DataStore {
   return setStoreArchivedAt(db, input, now, now);
 }
 
-/** Restores an Archived Data Store. Fails with `conflict` when a live Data Store took its name. */
+/**
+ * Restores an Archived Data Store. Throws `StorageError` `conflict` if a live Data Store has its
+ * name.
+ */
 export function restoreStore(db: Database, input: VersionedRef, now: string): DataStore {
   return setStoreArchivedAt(db, input, null, now);
 }
@@ -463,7 +485,7 @@ function setStoreArchivedAt(
   return dataStore(db, store.id);
 }
 
-/** Data Stores that are Archived. */
+/** Returns the Archived Data Stores, in the order that they were Archived. */
 export function archivedStores(db: Database): DataStore[] {
   return db
     .all(StoreRow, "SELECT * FROM stores WHERE archivedAt IS NOT NULL ORDER BY archivedAt")
