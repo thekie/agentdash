@@ -18,24 +18,24 @@ Terms follow `CONTEXT.md`.
 
 Light and dark use the same token names. Dark follows `prefers-color-scheme`; there is no in-app toggle in v1.
 
-| Token | Light | Dark | Use |
-|---|---|---|---|
-| `bg` | `#EEF0F5` | `#0D0F14` | Page ground |
-| `panel` | `#FFFFFF` | `#171A21` | Widgets, sidebar, breadcrumb pills |
-| `soft` | `#F3F4F8` | `#1F232C` | Chips, table header, round buttons, "No data yet" box |
-| `track` | `#EEF0F4` | `#262B35` | Progress track |
-| `line` | `#E8EAF0` | `#262B35` | Gridlines, table rows, dashed outlines |
-| `ink` | `#12141A` | `#EEF0F5` | Text, values |
-| `ink-2` | `#4B5260` | `#B9BFCC` | Secondary text, KPI labels |
-| `ink-3` | `#5F6672` | `#9097A5` | Timestamps, axis labels, meta |
-| `accent` | `#4361EE` | `#7B93FF` | Links, current nav item text, done checks |
-| `accent-soft` | `#ECF0FE` | `#232B47` | Current nav item background |
-| `note` / `note-ink` | `#E9EEFE` / `#1E2230` | `#1E2540` / `#DDE3F7` | Note Widget |
-| `good` / `good-bg` | `#0E7A55` / `#E2F5EC` | `#4FD6A0` / `#12332A` | Change in the good direction |
-| `bad` / `bad-bg` | `#C2362F` / `#FDECEB` | `#FF8A80` / `#3A1E1E` | Bad change, overdue, over budget, errors |
-| `warn` | `#B7791F` | `#E9B949` | Reconnecting |
-| `live` | `#1BAA7B` | `#4FD6A0` | Live dot |
-| `tip` / `tip-ink` | `#12141A` / `#FFFFFF` | `#F3F4F8` / `#12141A` | Chart tooltip (inverted surface) |
+| Token               | Light                 | Dark                  | Use                                                   |
+| ------------------- | --------------------- | --------------------- | ----------------------------------------------------- |
+| `bg`                | `#EEF0F5`             | `#0D0F14`             | Page ground                                           |
+| `panel`             | `#FFFFFF`             | `#171A21`             | Widgets, sidebar, breadcrumb pills                    |
+| `soft`              | `#F3F4F8`             | `#1F232C`             | Chips, table header, round buttons, "No data yet" box |
+| `track`             | `#EEF0F4`             | `#262B35`             | Progress track                                        |
+| `line`              | `#E8EAF0`             | `#262B35`             | Gridlines, table rows, dashed outlines                |
+| `ink`               | `#12141A`             | `#EEF0F5`             | Text, values                                          |
+| `ink-2`             | `#4B5260`             | `#B9BFCC`             | Secondary text, KPI labels                            |
+| `ink-3`             | `#5F6672`             | `#9097A5`             | Timestamps, axis labels, meta                         |
+| `accent`            | `#4361EE`             | `#7B93FF`             | Links, current nav item text, done checks             |
+| `accent-soft`       | `#ECF0FE`             | `#232B47`             | Current nav item background                           |
+| `note` / `note-ink` | `#E9EEFE` / `#1E2230` | `#1E2540` / `#DDE3F7` | Note Widget                                           |
+| `good` / `good-bg`  | `#0E7A55` / `#E2F5EC` | `#4FD6A0` / `#12332A` | Change in the good direction                          |
+| `bad` / `bad-bg`    | `#C2362F` / `#FDECEB` | `#FF8A80` / `#3A1E1E` | Bad change, overdue, over budget, errors              |
+| `warn`              | `#B7791F`             | `#E9B949`             | Reconnecting                                          |
+| `live`              | `#1BAA7B`             | `#4FD6A0`             | Live dot                                              |
+| `tip` / `tip-ink`   | `#12141A` / `#FFFFFF` | `#F3F4F8` / `#12141A` | Chart tooltip (inverted surface)                      |
 
 **Chart series**, in order: `s1` blue `#4361EE` / `#7B93FF`, `s2` peach `#F2A272` / `#F6AE80`, `s3` mint `#48C9A6` / `#4FD6B4`, `s4` lilac `#B39DF7` / `#BFA9FF`. More than four series repeat the cycle.
 
@@ -49,17 +49,17 @@ Text contrast is at least 4.5:1 on its surface in both themes, including `ink-3`
 
 Plus Jakarta Sans (400, 500, 600, 700) for everything; JetBrains Mono only for code and connect commands. Numbers use `font-variant-numeric: tabular-nums`.
 
-| Role | Size / weight | Notes |
-|---|---|---|
-| Dashboard title | 36 / 700 | letter-spacing −0.03em, with a 52px icon tile |
-| KPI value | 34 / 700 | unit as 18/600 in `ink-3`; `€` stays a prefix |
-| Section heading | 22 / 700 | `section` Widgets |
-| Widget title | 19 / 700 | charts, tables, progress lists |
-| KPI label | 14 / 600 | `ink-2` |
-| Checklist and note titles | 15 / 700 | |
-| Description, note body | 16 / 400 | line-height 1.7 for notes |
-| UI text | 14 / 400 | sidebar, table cells |
-| Meta | 12–13 / 500 | timestamps, legends, axis labels |
+| Role                      | Size / weight | Notes                                         |
+| ------------------------- | ------------- | --------------------------------------------- |
+| Dashboard title           | 36 / 700      | letter-spacing −0.03em, with a 52px icon tile |
+| KPI value                 | 34 / 700      | unit as 18/600 in `ink-3`; `€` stays a prefix |
+| Section heading           | 22 / 700      | `section` Widgets                             |
+| Widget title              | 19 / 700      | charts, tables, progress lists                |
+| KPI label                 | 14 / 600      | `ink-2`                                       |
+| Checklist and note titles | 15 / 700      |                                               |
+| Description, note body    | 16 / 400      | line-height 1.7 for notes                     |
+| UI text                   | 14 / 400      | sidebar, table cells                          |
+| Meta                      | 12–13 / 500   | timestamps, legends, axis labels              |
 
 ## Space and shape
 
