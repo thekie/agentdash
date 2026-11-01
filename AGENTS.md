@@ -3,7 +3,6 @@
 A self-hosted dashboard written by AI agents over MCP and read by one human in the browser. One Node process serves the web UI and the MCP endpoint.
 
 - **Glossary:** [CONTEXT.md](CONTEXT.md). Use its terms (Owner, Agent, Area, Dashboard, Widget, Data Store, Projection). Skills that look for `GLOSSARY.md` (such as `/tdd`) should read `CONTEXT.md`.
-- **Plan:** the [Map: agentdash v1](https://github.com/thekie/agentdash/issues/1) issue and its child tickets list the work still to do.
 - **Source of truth:** the code, its tests and `CONTEXT.md` say what agentdash does. The reason for a choice goes in the pull request description and the commit message, where `git log` and `git blame` find it. There are no ADRs. A rule that agents keep breaking goes into a type, a test or a lint first, and into `CODING_STANDARDS.md` only when no check can hold it.
 - **Standards:** [CODING_STANDARDS.md](CODING_STANDARDS.md) holds the rules tooling cannot check.
 
