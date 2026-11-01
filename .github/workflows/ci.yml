@@ -1,0 +1,38 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npm run check
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npx playwright install --with-deps --only-shell chromium
+      - name: MCP smoke (Inspector CLI)
+        run: |
+          node src/main.ts --port 0 --data-dir "$RUNNER_TEMP/smoke" > "$RUNNER_TEMP/server.log" &
+          trap 'kill $!' EXIT
+          timeout 30 sh -c 'until grep -q /mcp "$0"; do sleep 1; done' "$RUNNER_TEMP/server.log"
+          url=$(grep -om1 'http://[^ ]*/mcp' "$RUNNER_TEMP/server.log")
+          npx mcp-inspector --cli --transport http --server-url "$url" \
+            --method initialize --connect-timeout 10000 --format json \
+            | jq -e --arg name "$(node -p 'require("./package.json").name')" '.result.serverInfo.name == $name'
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with: { name: playwright-report, path: playwright-report/, retention-days: 14 }

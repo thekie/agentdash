@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+npx biome check --staged --files-ignore-unknown=true --no-errors-on-unmatched
+npx tsc
