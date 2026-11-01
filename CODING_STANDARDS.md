@@ -1,6 +1,6 @@
 # Coding standards
 
-Rules that Biome, `tsc` and the CRAP gate cannot check. Anything they check is out of scope for review.
+Rules that Biome, `tsc` and the coverage threshold cannot check. Anything they check is out of scope for review.
 
 ## Shape
 

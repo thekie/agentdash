@@ -15,12 +15,12 @@ A self-hosted dashboard written by AI agents over MCP and read by one human in t
 
 ## Commands
 
-- `npm run check`: Biome, `tsc`, Vitest. Run before every commit (the pre-commit hook runs Biome and `tsc`).
+- `npm run check`: Biome, `tsc`, Vitest with coverage. Run before every commit (the pre-commit hook runs Biome and `tsc`).
 - `npm run e2e`: builds the UI and runs Playwright against a real server.
 - `npm run dev`: server with `--watch`, data in `.data/dev`.
 - `npm run fix`: Biome autofix.
 
-CI also fails when any function in `src/` scores above 10 on CRAP (complexity weighted by missing test coverage, from `unclebob/crapper`). Split the function, test it, or both.
+`npm run check` fails when a function's cognitive complexity exceeds 10 (Biome) or unit coverage of `src/` drops below 80% (Vitest). Split the function or test it.
 
 Each commit message says why, what changed, and how you proved it.
 

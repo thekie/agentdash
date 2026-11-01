@@ -19,23 +19,7 @@ jobs:
       - run: npm ci
       - run: npx biome ci .
       - run: npx tsc
-      - run: npx vitest run
-  crap:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
-        with:
-          repository: unclebob/crapper
-          ref: 6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d
-          path: .tools/crapper
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: actions/setup-node@v7
-        with: { node-version-file: .nvmrc, cache: npm }
-      - run: npm ci
-      - run: .tools/crapper/crapper src --threshold 10
+      - run: npx vitest run --coverage
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -3,5 +3,4 @@ dist/
 playwright-report/
 test-results/
 .data/
-.metrics/
-.tools/
+coverage/
