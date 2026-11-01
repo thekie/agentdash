@@ -5,12 +5,13 @@ on:
     branches: [main]
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -19,22 +20,40 @@ jobs:
       - run: npx biome ci .
       - run: npx tsc
       - run: npx vitest run
+  crap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: unclebob/crapper
+          ref: 6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d
+          path: .tools/crapper
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: npm }
+      - run: npm ci
+      - run: .tools/crapper/crapper src --threshold 10
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version-file: .nvmrc, cache: npm }
       - run: npm ci
       - run: npx playwright install --with-deps --only-shell chromium
-      - run: npm run e2e
       - name: MCP smoke (Inspector CLI)
         run: |
-          node src/main.ts --port 4398 --data-dir .data/smoke &
-          timeout 30 sh -c 'until curl -sf -o /dev/null http://127.0.0.1:4398/; do sleep 1; done'
-          npx --yes @modelcontextprotocol/inspector@2.13.0 --cli --transport http \
-            --server-url http://127.0.0.1:4398/mcp --method initialize --connect-timeout 10000 --format json \
+          node src/main.ts --port 4398 --data-dir "$RUNNER_TEMP/smoke" &
+          trap 'kill $!' EXIT
+          timeout 30 sh -c 'until curl -s -o /dev/null http://127.0.0.1:4398/mcp; do sleep 1; done'
+          npx mcp-inspector --cli --transport http --server-url http://127.0.0.1:4398/mcp \
+            --method initialize --connect-timeout 10000 --format json \
             | jq -e '.result.serverInfo.name == "agentdash"'
+      - run: npm run e2e
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with: { name: playwright-report, path: playwright-report/, retention-days: 14 }

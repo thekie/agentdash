@@ -14,7 +14,7 @@ test("takes --port and resolves --data-dir to an absolute path", () => {
   });
 });
 
-test.each(["abc", "-1", "70000", "1.5"])("rejects --port %s", (port) => {
+test.for(["abc", "-1", "70000", "1.5"])("rejects --port %s", (port) => {
   expect(() => parseOptions(["--port", port])).toThrow("--port");
 });
 
