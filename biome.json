@@ -16,7 +16,8 @@
     "rules": {
       "preset": "recommended",
       "nursery": {
-        "noFloatingPromises": "error"
+        "noFloatingPromises": "error",
+        "noUnsafeTypeAssertion": "error"
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
@@ -25,6 +26,13 @@
             "maxAllowedComplexity": 10
           }
         }
+      },
+      "performance": {
+        "noReExportAll": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "error",
+        "useNamingConvention": "error"
       }
     },
     "domains": {

@@ -1,25 +1,27 @@
 # Coding standards
 
-Rules that Biome, `tsc` and the coverage threshold cannot check. Anything they check is out of scope for review.
+Rules that Biome, `tsc` and the coverage threshold cannot check. Anything they check is out of scope for review: casing follows Google's TypeScript style guide through Biome's `useNamingConvention`, and Biome rejects `export *`, non-null `!` and unsafe `as`.
 
 ## Shape
 
 - **Domain terms.** Name code after `CONTEXT.md`. Never use a term it lists under _Avoid_.
 - **Types before tests.** If a type can make a mistake impossible, use the type. Delete a runtime guard for a case the types already rule out, and its test with it.
-- **Parse at the boundary.** Data from outside (MCP tool input, HTTP requests, SQLite rows) is parsed once where it enters, with zod. Inside, trust the types. No `as`, `!` or `@ts-expect-error` to quiet the compiler.
+- **Parse at the boundary.** Data from outside (MCP tool input, HTTP requests, SQLite rows) is parsed once where it enters, with zod. Inside, trust the types. No `@ts-expect-error` to quiet the compiler.
 - **Logic in pure functions.** Hono and MCP handlers parse, call, and translate the result. The decisions they call live in functions with no I/O.
 - **Idempotent tools.** Repeating an MCP tool call, or retrying it after a crash, ends in the same state.
 - **A type describes the thing.** Keep the cases of a thing in a union. Compose object types with `extends`; use `&` only to join an object type to a union.
 - **Layers meet through an interface.** The UI, the MCP tools and storage reach each other only through what each one exports.
 - **SQL lives in the storage module.** No SQL strings elsewhere.
 - **MCP wiring stays in one place:** `src/app.ts` and the tool modules it registers.
-- **Name each export.** No `export *`.
 - **Fix the cause.** A guard that only stops a crash from showing is not a fix.
 
 ## Names
 
+- Use the word the library already uses: `close` for the MCP handler, `createX` for a factory as in `createRoot` and `createMcpHandler`.
+- A function that returns a value and changes nothing is named for the value: `oversizedUploads`. Exceptions follow TypeScript idiom: a factory is `createX`, a boundary parser is `parseX`, a type guard is `isX`.
+- A function that changes something gets a verb and an object: `archiveWidget`.
+- A boolean starts with `is`, `has`, `can` or `should`. A collection name is plural.
 - A file name says what the file holds. No `utils`, `helpers`, `common`, `misc` or `shared`.
-- A function that returns a value and changes nothing is named for the value. A function that changes something gets a verb and an object.
 - No vague verbs: `handle`, `process`, `manage`, `perform`, `do`. If an accurate name is long, split the function.
 - One thing gets one word everywhere. Two sides of one thing get the same shape: `archiveWidget` and `restoreWidget`.
 

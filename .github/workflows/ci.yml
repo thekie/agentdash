@@ -14,29 +14,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with: { node-version-file: .nvmrc, cache: npm }
-      - run: npm ci
-      - run: npx biome ci .
-      - run: npx tsc
-      - run: npx vitest run --coverage
+      - uses: ./.github/actions/setup
+      - run: npm run check
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with: { node-version-file: .nvmrc, cache: npm }
-      - run: npm ci
+      - uses: ./.github/actions/setup
       - run: npx playwright install --with-deps --only-shell chromium
       - name: MCP smoke (Inspector CLI)
         run: |
-          node src/main.ts --port 4398 --data-dir "$RUNNER_TEMP/smoke" &
+          node src/main.ts --port 0 --data-dir "$RUNNER_TEMP/smoke" > "$RUNNER_TEMP/server.log" &
           trap 'kill $!' EXIT
-          timeout 30 sh -c 'until curl -s -o /dev/null http://127.0.0.1:4398/mcp; do sleep 1; done'
-          npx mcp-inspector --cli --transport http --server-url http://127.0.0.1:4398/mcp \
+          timeout 30 sh -c 'until grep -q /mcp "$0"; do sleep 1; done' "$RUNNER_TEMP/server.log"
+          url=$(grep -om1 'http://[^ ]*/mcp' "$RUNNER_TEMP/server.log")
+          npx mcp-inspector --cli --transport http --server-url "$url" \
             --method initialize --connect-timeout 10000 --format json \
-            | jq -e '.result.serverInfo.name == "agentdash"'
+            | jq -e --arg name "$(node -p 'require("./package.json").name')" '.result.serverInfo.name == $name'
       - run: npm run e2e
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}

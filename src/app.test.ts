@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { test as base, expect } from "vitest";
-import { createApp, VERSION } from "./app.ts";
+import { createApp, serverInfo } from "./app.ts";
 
 const test = base.extend<{ app: ReturnType<typeof createApp>["app"] }>({
   // biome-ignore lint/correctness/noEmptyPattern: Vitest fixtures require object destructuring
@@ -29,7 +29,7 @@ test.for([
         fetch: async (url, init) => app.fetch(new Request(url, init)),
       }),
     );
-    expect(client.getServerVersion()).toMatchObject({ name: "agentdash", version: VERSION });
+    expect(client.getServerVersion()).toEqual(serverInfo);
     expect(client.getProtocolEra()).toBe(era);
     await client.close();
   },
