@@ -40,7 +40,7 @@ The optional set of columns that identify a row in a Data Store, such as the dat
 _Avoid_: id, primary key
 
 **Projection**:
-A Widget's declarative description of which Data Stores it reads and how it filters, joins, groups, and aggregates them into the slots the Widget draws.
+A Widget's declarative description of which Data Stores it reads and how it filters, joins, groups, and aggregates them into the slots the Widget draws. Running a Projection to read its rows is a **query**. The Projection is the description, and the query is the read.
 _Avoid_: query, mapping, view
 
 **Slot**:
@@ -48,7 +48,7 @@ A named input a Widget type draws, such as `x`, `y`, `value` or `target`. A Proj
 _Avoid_: field, channel, binding
 
 **Archive**:
-Removing a Dashboard, Widget, or Data Store from view without destroying it. Agents never delete permanently.
+Removing a Dashboard, Widget, or Data Store from view without destroying it. Agents never delete permanently. Anything that is not Archived is **live**, so "the live Data Stores" are the ones not Archived.
 _Avoid_: delete, trash
 
 ## Relationships

@@ -53,7 +53,8 @@ export function liveColumns(store: StoreRow): Column[] {
   return store.columns.filter((c) => c.archivedAt === undefined);
 }
 
-function storeRow(db: Database, ref: string): StoreRow | undefined {
+/** Returns the Data Store with the id, or the live Data Store with the name. */
+export function storeRow(db: Database, ref: string): StoreRow | undefined {
   return (
     db.one(StoreRow, "SELECT * FROM stores WHERE id = ?", ref) ??
     db.one(StoreRow, "SELECT * FROM stores WHERE name = ? AND archivedAt IS NULL", ref)

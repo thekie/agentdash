@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { constants, DatabaseSync, type SQLInputValue, type SQLOutputValue } from "node:sqlite";
 import type { z } from "zod";
 
 const schema = `
@@ -69,12 +69,43 @@ export interface Database {
     ...params: SQLInputValue[]
   ): z.output<T> | undefined;
   run(sql: string, ...params: SQLInputValue[]): void;
+  /**
+   * Returns every row of a statement that only reads Data Store tables. Throws if the statement
+   * writes, reads another table, or calls a function other than `count`, `sum`, `avg`, `min`,
+   * `max`, `last_value`, `date`, `strftime` and `printf`.
+   */
+  select(sql: string, ...params: SQLInputValue[]): Record<string, SQLOutputValue>[];
   exec(sql: string): void;
   /** Runs `body` atomically. If `body` throws, everything that it wrote is rolled back. */
   transaction<T>(body: () => T): T;
   /** Runs `body`, rolls back everything that it wrote, and returns the result of `body`. */
   rehearse<T>(body: () => T): T;
   close(): void;
+}
+
+/** The functions that a statement passed to `select` can call. */
+const readFunctions = new Set([
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "last_value",
+  "date",
+  "strftime",
+  "printf",
+]);
+
+/**
+ * Returns `SQLITE_OK` for a read of a Data Store table or a call of a function in `readFunctions`,
+ * and `SQLITE_DENY` for anything else.
+ */
+function readOnly(action: number, table: string | null, nameOrColumn: string | null) {
+  const allowed =
+    action === constants.SQLITE_SELECT ||
+    (action === constants.SQLITE_READ && table?.startsWith("ds_") === true) ||
+    (action === constants.SQLITE_FUNCTION && readFunctions.has(nameOrColumn ?? ""));
+  return allowed ? constants.SQLITE_OK : constants.SQLITE_DENY;
 }
 
 /**
@@ -95,6 +126,17 @@ export function openDatabase(path: string): Database {
       return found === undefined ? undefined : row.parse({ ...found });
     },
     run: (sql, ...params) => void sqlite.prepare(sql).run(...params),
+    select: (sql, ...params) => {
+      sqlite.setAuthorizer(readOnly);
+      try {
+        return sqlite
+          .prepare(sql)
+          .all(...params)
+          .map((r) => ({ ...r }));
+      } finally {
+        sqlite.setAuthorizer(null);
+      }
+    },
     exec: (sql) => sqlite.exec(sql),
     transaction: (body) => {
       sqlite.exec("SAVEPOINT tx");

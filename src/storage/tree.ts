@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { createId, type Database } from "./database.ts";
-import { assertVersion, StorageError } from "./errors.ts";
+import { assertNoIssues, assertVersion, type Issue, type Path, StorageError } from "./errors.ts";
 import { type Position, placeAt } from "./position.ts";
+import {
+  type Broken,
+  Projection,
+  presentProjection,
+  storedProjection,
+  storesRead,
+} from "./projection.ts";
 
 const DashboardRow = z.object({
   id: z.string(),
@@ -29,7 +36,7 @@ const WidgetRow = z.object({
   projection: z
     .string()
     .nullable()
-    .transform((s): unknown => (s === null ? null : JSON.parse(s))),
+    .transform((s) => (s === null ? null : Projection.parse(JSON.parse(s)))),
   version: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -56,6 +63,8 @@ export interface Dashboard {
 interface DashboardSummary extends Pick<Dashboard, "id" | "parentId" | "path" | "title" | "icon"> {
   widgetCount: number;
   childCount: number;
+  /** The number of Widgets on the Dashboard that cannot read their Data Stores. */
+  brokenWidgetCount: number;
 }
 
 /**
@@ -76,7 +85,10 @@ export interface Widget {
   type: string;
   title: string | null;
   config: unknown;
+  /** The Projection in Agent form, with the current names of its Data Stores and columns. */
   projection: unknown;
+  /** The reason the Widget cannot read its Data Stores. It is missing if the Widget works. */
+  broken?: Broken;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -90,8 +102,12 @@ interface DashboardWithWidgets extends Dashboard {
 /** Describes where a Widget is: on a Dashboard, found by id or path, or in a layout Widget. */
 type WidgetParent = { dashboard: string } | { widget: string };
 
-/** Holds every Dashboard and Widget. Each call reads the whole tree. */
+/**
+ * Holds every Dashboard and Widget, and the database that their Projections read. Each call reads
+ * the whole tree.
+ */
 interface Tree {
+  db: Database;
   dashboards: Map<string, DashboardRow>;
   widgets: Map<string, WidgetRow>;
 }
@@ -100,6 +116,7 @@ function treeOf(db: Database): Tree {
   const dashboards = db.all(DashboardRow, "SELECT * FROM dashboards ORDER BY ord, id");
   const widgets = db.all(WidgetRow, "SELECT * FROM widgets ORDER BY ord, id");
   return {
+    db,
     dashboards: new Map(dashboards.map((d) => [d.id, d])),
     widgets: new Map(widgets.map((w) => [w.id, w])),
   };
@@ -310,10 +327,26 @@ function liveWidgetsIn(tree: Tree, key: string): WidgetRow[] {
   return [...tree.widgets.values()].filter((w) => containerKey(w) === key && w.archivedAt === null);
 }
 
+function presented(tree: Tree, row: WidgetRow): { projection: unknown; broken?: Broken } {
+  return row.projection === null
+    ? { projection: null }
+    : presentProjection(tree.db, row.projection);
+}
+
 function toWidget(tree: Tree, row: WidgetRow): Widget {
-  const { id, type, title, config, projection, version, createdAt, updatedAt } = row;
+  const { id, type, title, config, version, createdAt, updatedAt } = row;
   const children = liveWidgetsIn(tree, `w:${id}`).map((child) => toWidget(tree, child));
-  return { id, type, title, config, projection, version, createdAt, updatedAt, children };
+  return {
+    id,
+    type,
+    title,
+    config,
+    ...presented(tree, row),
+    version,
+    createdAt,
+    updatedAt,
+    children,
+  };
 }
 
 /**
@@ -329,20 +362,22 @@ export function dashboardWithWidgets(db: Database, ref: string): DashboardWithWi
   return { ...toDashboard(tree, row), widgets };
 }
 
-function widgetCount(tree: Tree, key: string): number {
-  return liveWidgetsIn(tree, key).reduce((n, w) => n + 1 + widgetCount(tree, `w:${w.id}`), 0);
+function widgetsUnder(tree: Tree, key: string): WidgetRow[] {
+  return liveWidgetsIn(tree, key).flatMap((w) => [w, ...widgetsUnder(tree, `w:${w.id}`)]);
 }
 
 function summaries(tree: Tree, row: DashboardRow): DashboardSummary[] {
   const children = liveChildren(tree, row.id);
+  const widgets = widgetsUnder(tree, `d:${row.id}`);
   const summary: DashboardSummary = {
     id: row.id,
     parentId: row.parentId,
     path: pathOf(tree, row),
     title: row.title,
     icon: row.icon,
-    widgetCount: widgetCount(tree, `d:${row.id}`),
+    widgetCount: widgets.length,
     childCount: children.length,
+    brokenWidgetCount: widgets.filter((w) => presented(tree, w).broken).length,
   };
   return [summary, ...children.flatMap((child) => summaries(tree, child))];
 }
@@ -402,6 +437,23 @@ function insertWidget(
   return id;
 }
 
+/** Returns the subtree with each Projection in stored form, and adds every problem to `issues`. */
+function resolveSubtree(
+  db: Database,
+  input: WidgetInput,
+  path: Path,
+  issues: Issue[],
+): WidgetInput {
+  const children = input.children?.map((child, index) =>
+    resolveSubtree(db, child, [...path, "children", index], issues),
+  );
+  const projection =
+    input.projection === undefined
+      ? undefined
+      : storedProjection(db, input.projection, [...path, "projection"], issues);
+  return { ...input, projection, children };
+}
+
 interface AddWidgetInput {
   parent: WidgetParent;
   widget: WidgetInput;
@@ -415,7 +467,10 @@ interface AddWidgetInput {
 export function addWidget(db: Database, input: AddWidgetInput, now: string): Widget {
   const tree = treeOf(db);
   const container = resolveContainer(tree, input.parent);
-  const id = insertWidget(db, input.widget, container, 0, now);
+  const issues: Issue[] = [];
+  const widget = resolveSubtree(db, input.widget, ["widget"], issues);
+  assertNoIssues(issues, "The Widget is invalid");
+  const id = insertWidget(db, widget, container, 0, now);
   const siblings = liveWidgetsIn(tree, container.key).map((w) => w.id);
   writeOrder(db, "widgets", placement(siblings, id, input.position ?? "last"));
   return widgetById(db, id);
@@ -440,12 +495,18 @@ export function updateWidget(db: Database, input: UpdateWidgetInput, now: string
   const row = findWidget(tree, input.id);
   assertVersion(row, input.expectedVersion, () => toWidget(tree, row));
   assertNotArchived(archivedAbove(tree, row));
+  const issues: Issue[] = [];
+  const projection =
+    input.projection === undefined
+      ? undefined
+      : storedProjection(db, input.projection, ["projection"], issues);
+  assertNoIssues(issues, "The Widget is invalid");
   db.run(
     `UPDATE widgets SET title = ?, config = ?, projection = ?, version = version + 1, updatedAt = ?
      WHERE id = ?`,
     input.title ?? null,
     JSON.stringify(input.config),
-    input.projection === undefined ? null : JSON.stringify(input.projection),
+    projection === undefined ? null : JSON.stringify(projection),
     now,
     row.id,
   );
@@ -648,4 +709,17 @@ export function archivedTreeItems(db: Database): {
     dashboards: [...tree.dashboards.values()].flatMap(pick),
     widgets: [...tree.widgets.values()].flatMap(pick),
   };
+}
+
+/** Returns the ids of the live Widgets that read each Data Store, keyed by the Data Store's id. */
+export function storeReaders(db: Database): Map<string, string[]> {
+  const tree = treeOf(db);
+  const readers = new Map<string, string[]>();
+  for (const widget of tree.widgets.values()) {
+    if (widget.projection === null || archivedAbove(tree, widget)) continue;
+    for (const store of storesRead(widget.projection)) {
+      readers.set(store, [...(readers.get(store) ?? []), widget.id]);
+    }
+  }
+  return readers;
 }

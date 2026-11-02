@@ -1,4 +1,6 @@
 import { type Database, openDatabase } from "./database.ts";
+import type { ProjectionInput } from "./projection.ts";
+import { queryProjection } from "./query.ts";
 import { appendRows, archivedRows, archiveRow, liveRows, restoreRow, updateRows } from "./rows.ts";
 import {
   alterStore,
@@ -20,6 +22,7 @@ import {
   moveWidget,
   restoreDashboard,
   restoreWidget,
+  storeReaders,
   treeSummaries,
   updateDashboard,
   updateWidget,
@@ -57,8 +60,14 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     archiveWidget: write(archiveWidget),
     restoreWidget: write(restoreWidget),
 
-    stores: () => liveStores(db),
-    store: (ref: string) => dataStore(db, ref),
+    stores: () => {
+      const readers = storeReaders(db);
+      return liveStores(db).map((store) => ({ ...store, readers: readers.get(store.id) ?? [] }));
+    },
+    store: (ref: string) => {
+      const store = dataStore(db, ref);
+      return { ...store, readers: storeReaders(db).get(store.id) ?? [] };
+    },
     createStore: write(createStore),
     alterStore: write(alterStore),
     archiveStore: write(archiveStore),
@@ -70,6 +79,8 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     updateRows: write(updateRows),
     archiveRow: write(archiveRow),
     restoreRow: write(restoreRow),
+
+    query: (projection: ProjectionInput) => queryProjection(db, projection, now()),
 
     /**
      * Returns the Dashboards, Widgets and Data Stores that are Archived themselves, without the

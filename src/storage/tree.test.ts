@@ -162,6 +162,7 @@ test("a write under an Archived Dashboard fails with archived, naming it", ({ st
 
 test("a Widget subtree is added in order and read back nested", ({ storage }) => {
   const area = storage.createDashboard({ title: "Health" });
+  storage.createStore({ name: "weight", columns: [{ key: "kg", type: "number" }] });
   storage.addWidget({
     parent: { dashboard: area.id },
     widget: {

@@ -75,3 +75,19 @@ test("shipped migrations do not change", () => {
     ]
   `);
 });
+
+test.for([
+  ["SELECT * FROM stores", /prohibited/],
+  ["DELETE FROM ds_s_0000000000001", /not authorized/],
+  ["SELECT randomblob(4) FROM ds_s_0000000000001", /randomblob/],
+  [
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT i FROM n",
+    /not authorized/,
+  ],
+] as const)("select refuses %s", ([sql, message]) => {
+  const db = openDatabase(":memory:");
+  db.exec("CREATE TABLE ds_s_0000000000001 (id INTEGER PRIMARY KEY)");
+  expect(() => db.select(sql)).toThrow(message);
+  expect(db.select("SELECT count(*) AS n FROM ds_s_0000000000001")).toEqual([{ n: 0 }]);
+  db.close();
+});
