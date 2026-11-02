@@ -1,7 +1,7 @@
 import type { SQLInputValue } from "node:sqlite";
 import type { ColumnType } from "./columns.ts";
 import { type Database, quoteId } from "./database.ts";
-import { type Issue, StorageError } from "./errors.ts";
+import { type Issue, type Path, StorageError } from "./errors.ts";
 import {
   type Bucket,
   isRelative,
@@ -151,6 +151,21 @@ export interface QueryResult {
   rows: Record<string, unknown>[];
   /** Is true if the Data Stores hold more rows than the limit. */
   truncated: boolean;
+}
+
+/**
+ * Returns the output columns of a Projection in Agent form, or every problem it has, each with
+ * `path` in front.
+ */
+export function projectionColumns(
+  db: Database,
+  input: unknown,
+  path: Path,
+): { columns: QueryResult["columns"] } | { issues: Issue[] } {
+  const issues: Issue[] = [];
+  const projection = resolveAgentProjection(db, input, path, issues);
+  if (!projection) return { issues };
+  return { columns: projection.outputs.map(({ name, type }) => ({ name, type })) };
 }
 
 /**

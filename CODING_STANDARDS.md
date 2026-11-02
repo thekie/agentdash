@@ -8,7 +8,7 @@ Rules that Biome, `tsc` and the coverage threshold cannot check. Anything they c
 - **Types before tests.** If a type can make a mistake impossible, use the type. Delete a runtime guard for a case the types already rule out, and its test with it.
 - **Parse at the boundary.** Data from outside (MCP tool input, HTTP requests, SQLite rows) is parsed once where it enters, with zod. Inside, trust the types. No `@ts-expect-error` to quiet the compiler.
 - **Logic in pure functions.** Hono and MCP handlers parse, call, and translate the result. The decisions they call live in functions with no I/O.
-- **Idempotent tools.** Repeating an MCP tool call, or retrying it after a crash, ends in the same state.
+- **Idempotent tools.** Repeating an MCP tool call, or retrying it after a crash, ends in the same state. A create is the exception: it fails with `conflict` on a taken slug, name or Key, and without one it adds a second item. `widget_add` and `rows_append` on a Data Store without a Key work this way.
 - **A type describes the thing.** Keep the cases of a thing in a union. Compose object types with `extends`; use `&` only to join an object type to a union.
 - **Layers meet through an interface.** The UI, the MCP tools and storage reach each other only through what each one exports.
 - **SQL lives in the storage module.** No SQL strings elsewhere.

@@ -201,7 +201,8 @@ export function liveStores(db: Database): DataStore[] {
     .map((store) => toDataStore(db, store));
 }
 
-const AlterOp = z.discriminatedUnion("op", [
+/** The schema of one change that `alterStore` applies to a Data Store. */
+export const AlterOp = z.discriminatedUnion("op", [
   z.object({ op: z.literal("add_column"), column: ColumnSpec }),
   z.object({
     op: z.literal("rename_column"),
@@ -211,6 +212,7 @@ const AlterOp = z.discriminatedUnion("op", [
   }),
   z.object({ op: z.literal("retype_column"), column: ColumnKey, to: ColumnTypeSpec }),
   z.object({ op: z.literal("archive_column"), column: ColumnKey }),
+  z.object({ op: z.literal("restore_column"), column: ColumnKey }),
   z.object({ op: z.literal("set_key"), columns: z.array(ColumnKey) }),
   z.object({
     op: z.literal("set_enum_options"),
@@ -218,7 +220,7 @@ const AlterOp = z.discriminatedUnion("op", [
     options: z.array(EnumOptionSpec).min(1),
   }),
 ]);
-type AlterOp = z.input<typeof AlterOp>;
+export type AlterOp = z.input<typeof AlterOp>;
 type ParsedAlterOp = z.output<typeof AlterOp>;
 
 interface KeyDuplicate {
@@ -358,6 +360,25 @@ function archiveColumn(draft: Draft, key: string, path: Path): void {
   replaceColumn(draft, column.physical, [{ ...column, archivedAt: draft.now }]);
 }
 
+/** Restores the Archived column with the key that was Archived last, with its values. */
+function restoreColumn(draft: Draft, key: string, path: Path): void {
+  const column = draft.store.columns.findLast((c) => c.key === key && c.archivedAt !== undefined);
+  if (!column) {
+    throw new StorageError("invalid", `No Archived column "${key}"`, {
+      issues: [
+        {
+          path,
+          problem: "unknown Archived column",
+          validValues: draft.store.columns.flatMap((c) => (c.archivedAt ? [c.key] : [])),
+        },
+      ],
+    });
+  }
+  assertColumnKeyFree(draft, key, path);
+  const { archivedAt: _, ...restored } = column;
+  replaceColumn(draft, column.physical, [restored]);
+}
+
 function setKey(draft: Draft, keys: string[], path: Path): OpReport {
   const issues: Issue[] = [];
   const key = physicalNames(liveColumns(draft.store), keys, path, issues);
@@ -396,6 +417,9 @@ function applyOp(draft: Draft, op: ParsedAlterOp, index: number): OpReport {
       return retypeColumn(draft, op.column, op.to, path);
     case "archive_column":
       archiveColumn(draft, op.column, path);
+      return { op: op.op };
+    case "restore_column":
+      restoreColumn(draft, op.column, path);
       return { op: op.op };
     case "set_key":
       return setKey(draft, op.columns, ["ops", index, "columns"]);

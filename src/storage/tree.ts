@@ -476,7 +476,11 @@ export function addWidget(db: Database, input: AddWidgetInput, now: string): Wid
   return widgetById(db, id);
 }
 
-function widgetById(db: Database, id: string): Widget {
+/**
+ * Returns the Widget with the id and its live children, also if it is Archived. Throws
+ * `StorageError` `not_found` if there is none.
+ */
+export function widgetById(db: Database, id: string): Widget {
   const tree = treeOf(db);
   return toWidget(tree, findWidget(tree, id));
 }
