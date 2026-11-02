@@ -40,7 +40,7 @@ The optional set of columns that identify a row in a Data Store, such as the dat
 _Avoid_: id, primary key
 
 **Projection**:
-A Widget's declarative description of which Data Stores it reads and how it filters, joins, groups, and aggregates them into the slots the Widget draws.
+A Widget's declarative description of which Data Stores it reads and how it filters, joins, groups, and aggregates them into the slots the Widget draws. Running a Projection to read its rows is a **query**. The Projection is the description, and the query is the read.
 _Avoid_: query, mapping, view
 
 **Slot**:

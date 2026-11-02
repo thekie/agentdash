@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { ColumnType, EnumOption } from "./columns.ts";
 
-/** Describes a value as the table of a Data Store holds it. */
-export type StoredValue = string | number | null;
+/** The schema of a value as the table of a Data Store holds it. */
+export const StoredValue = z.union([z.string(), z.number()]).nullable();
+export type StoredValue = z.infer<typeof StoredValue>;
 
 type ParsedValue =
   | { ok: true; stored: StoredValue }
