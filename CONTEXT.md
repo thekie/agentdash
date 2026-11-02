@@ -48,7 +48,7 @@ A named input a Widget type draws, such as `x`, `y`, `value` or `target`. A Proj
 _Avoid_: field, channel, binding
 
 **Archive**:
-Removing a Dashboard, Widget, or Data Store from view without destroying it. Agents never delete permanently.
+Removing a Dashboard, Widget, or Data Store from view without destroying it. Agents never delete permanently. Anything that is not Archived is **live**, so "the live Data Stores" are the ones not Archived.
 _Avoid_: delete, trash
 
 ## Relationships

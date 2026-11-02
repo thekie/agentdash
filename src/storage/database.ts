@@ -71,7 +71,8 @@ export interface Database {
   run(sql: string, ...params: SQLInputValue[]): void;
   /**
    * Returns every row of a statement that only reads Data Store tables. Throws if the statement
-   * writes, reads another table, or calls a function outside `readFunctions`.
+   * writes, reads another table, or calls a function other than `count`, `sum`, `avg`, `min`,
+   * `max`, `last_value`, `date`, `strftime` and `printf`.
    */
   select(sql: string, ...params: SQLInputValue[]): Record<string, SQLOutputValue>[];
   exec(sql: string): void;
