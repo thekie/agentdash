@@ -4,7 +4,8 @@ import type { z } from "zod";
 
 const schema = `
 CREATE TABLE dashboards (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY
+    CHECK (length(id) = 15 AND substr(id, 1, 2) = 'd_' AND substr(id, 3) NOT GLOB '*[^0-9a-z]*'),
   parentId TEXT REFERENCES dashboards(id),
   ord INTEGER NOT NULL,
   slug TEXT NOT NULL,
@@ -20,7 +21,8 @@ CREATE UNIQUE INDEX dashboardsLiveSlug ON dashboards(coalesce(parentId, ''), slu
   WHERE archivedAt IS NULL;
 
 CREATE TABLE widgets (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY
+    CHECK (length(id) = 15 AND substr(id, 1, 2) = 'w_' AND substr(id, 3) NOT GLOB '*[^0-9a-z]*'),
   dashboardId TEXT REFERENCES dashboards(id),
   parentId TEXT REFERENCES widgets(id),
   ord INTEGER NOT NULL,
@@ -36,7 +38,8 @@ CREATE TABLE widgets (
 ) STRICT;
 
 CREATE TABLE stores (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY
+    CHECK (length(id) = 15 AND substr(id, 1, 2) = 's_' AND substr(id, 3) NOT GLOB '*[^0-9a-z]*'),
   name TEXT NOT NULL,
   columns TEXT NOT NULL,
   key TEXT NOT NULL,

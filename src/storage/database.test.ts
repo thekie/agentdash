@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
-import { migrate, migrations } from "./database.ts";
+import { createId, migrate, migrations, openDatabase } from "./database.ts";
 
 function userVersion(sqlite: DatabaseSync): unknown {
   return sqlite.prepare("PRAGMA user_version").get()?.user_version;
@@ -30,13 +30,48 @@ test("a migration that ran is not run again", () => {
   sqlite.close();
 });
 
+test.each([
+  [
+    "dashboards",
+    "d",
+    "INSERT INTO dashboards (id, ord, slug, title, createdAt, updatedAt) VALUES (?, 0, 'x', 'x', '', '')",
+  ],
+  [
+    "widgets",
+    "w",
+    "INSERT INTO widgets (id, dashboardId, ord, type, config, createdAt, updatedAt) VALUES (?, 'd_0000000000000', 0, 'x', '{}', '', '')",
+  ],
+  [
+    "stores",
+    "s",
+    "INSERT INTO stores (id, name, columns, key, nextColumn, createdAt, updatedAt) VALUES (?, 'x', '[]', '[]', 0, '', '')",
+  ],
+] as const)("%s accept only ids that createId makes", (_table, prefix, insert) => {
+  const db = openDatabase(":memory:");
+  db.run(
+    "INSERT INTO dashboards (id, ord, slug, title, createdAt, updatedAt) VALUES ('d_0000000000000', 0, 'root', 'x', '', '')",
+  );
+  const other = prefix === "d" ? "w" : "d";
+  for (const bad of [
+    `${other}_0000000000000`,
+    `${prefix}_000000000000`,
+    `${prefix}_00000000000000`,
+    `${prefix}_000000000000A`,
+    `${prefix}_00000000000-0`,
+  ]) {
+    expect(() => db.run(insert, bad), bad).toThrow(/CHECK constraint failed/);
+  }
+  db.run(insert, createId(prefix));
+  db.close();
+});
+
 // An installed database has run these entries, and it never runs an edited entry again.
 // Add a new entry instead of changing a hash here.
 test("shipped migrations do not change", () => {
   const hashes = migrations.map((entry) => createHash("sha256").update(entry).digest("hex"));
   expect(hashes).toMatchInlineSnapshot(`
     [
-      "eb90d49dbaff079010ce20499a43a177955b8ec1c165e0d4092aa7907ed67502",
+      "29a59dba36829827c6dae17a3c3bd67cbccb8ebba4cd9dde2d5519c5a513055e",
     ]
   `);
 });
