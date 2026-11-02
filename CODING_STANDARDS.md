@@ -34,8 +34,41 @@ Rules that Biome, `tsc` and the coverage threshold cannot check. Anything they c
 - **Break a new guard once.** Add the violation a new test, type or lint must catch, see it fail, then remove the violation.
 - **A test must be able to fail.** Delete a test that would still pass if the function under test returned nothing.
 
-## Comments
+## Comments and docstrings
 
-- An exported function states its contract in one to three sentences: what it does or returns, and when it fails. No `@param` or `@returns` that repeat the signature.
-- Write a comment only when you can name the wrong belief it prevents. If a rename can carry it, rename instead.
-- The reason for a design goes in the pull request, not in a comment.
+These rules apply to comments, docstrings and error messages.
+
+### Words
+
+- Write plain technical English. Use short sentences of no more than 25 words, with one fact in each sentence. If a sentence needs a second reading, split it.
+- Use the active voice. The passive is permitted when the actor is the system and naming it adds nothing.
+- Use "can" and "must", not "may" or "should". Write "for example", not "e.g.". Do not use contractions, semicolons or em-dashes.
+- Use the terms of `CONTEXT.md` with their capitals. Write code in backticks, and do not use it as a verb.
+- Do not name the product in code, comments or messages.
+- Describe the present. Do not write history ("previously", "now", "changed") or issue and pull request numbers.
+- Write the plain sentence that says what happens. Do not write an antithesis for rhythm ("not X, but Y"), a maxim, or a closing line written to be quoted.
+
+### Docstrings
+
+- Every export has a docstring. A declaration that is not exported has none if its name and signature already say what it does. A Zod schema and the type of the same name share one docstring, on the schema.
+- A docstring states the contract in one to three sentences: what the declaration does or returns, and when it fails. It does not say how the body works or why the code has this shape. That goes in the pull request.
+- Do not add `@param` or `@returns` tags that repeat the signature.
+- Open on the verb for the kind of declaration. The declaration is the subject, and the docstring leaves it out.
+
+| Declaration                            | Verb                                                                                    | Example                                                   |
+| -------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| A function that computes a value       | Returns                                                                                 | `Returns the live rows of a Data Store.`                  |
+| A function that computes true or false | Reports whether                                                                         | `Reports whether the Dashboard is under an Archived one.` |
+| A function that you call for a change  | the verb of the change: creates, adds, writes, moves, archives, restores, opens, closes | `Archives a Widget and its subtree.`                      |
+| A type or an interface                 | Describes, represents, or a noun phrase                                                 | `Describes a Widget as an Agent writes it.`               |
+| A constant or a property               | Is, or a noun phrase                                                                    | `The most rows that one append can carry.`                |
+
+- If a function can throw, say when with "if", and name each error code that a caller checks for: "Throws `StorageError` `conflict` if a sibling has the slug."
+
+### Comments
+
+- Before you write a comment, name the wrong belief that it prevents. If you cannot name it, write nothing. If a name can hold it, rename the thing instead.
+- These comments fail the test: one that restates a boundary the code enforces, one that describes what a declaration declares, and one that records a decision.
+- These comments pass: a library that behaves unexpectedly, a value that is always the same for a reason, a rule that is enforced in a different place, and a shortcut with the point where it stops working.
+- After you change code, read the comment or docstring above it again.
+- A hook in `.claude/hooks/comment-length.py` reminds an agent of these rules when an edit adds a comment of more than three lines.

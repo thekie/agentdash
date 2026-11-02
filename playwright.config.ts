@@ -10,7 +10,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   ...(process.env.CI && { workers: 1 }),
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
-  // biome-ignore lint/style/useNamingConvention: Playwright option name
+  // biome-ignore lint/style/useNamingConvention: Playwright sets the name of this option.
   use: { baseURL: `http://${HOST}:${port}`, trace: "on-first-retry" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
