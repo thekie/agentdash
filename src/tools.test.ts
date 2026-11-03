@@ -100,6 +100,43 @@ test("the server lists 16 tools whose input schemas are objects", async ({ agent
   expect(tools.map((t) => t.inputSchema.type)).toEqual(Array(16).fill("object"));
 });
 
+test("every tool has a title and all four hints, and none is open-world", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  for (const { title, annotations } of tools) {
+    expect(title).toBeTruthy();
+    expect(Object.keys(annotations ?? {}).sort()).toEqual([
+      "destructiveHint",
+      "idempotentHint",
+      "openWorldHint",
+      "readOnlyHint",
+    ]);
+    expect(annotations?.openWorldHint).toBe(false);
+  }
+});
+
+test("only the tools that overwrite values are destructive", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  const destructive = tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name);
+  expect(destructive.sort()).toEqual([
+    "dashboard_update",
+    "rows_update",
+    "store_alter",
+    "widget_update",
+  ]);
+});
+
+test("only the tools that create items are not idempotent", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  const once = tools.filter((t) => !t.annotations?.idempotentHint).map((t) => t.name);
+  expect(once.sort()).toEqual(["dashboard_create", "rows_append", "store_create", "widget_add"]);
+});
+
+test("the large reads may return up to 500,000 characters inline", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  const large = tools.filter((t) => t._meta?.["anthropic/maxResultSizeChars"] === 500_000);
+  expect(large.map((t) => t.name).sort()).toEqual(["dashboard_get", "projection_query"]);
+});
+
 test("the widget_add schema names every Widget type", async ({ agent }) => {
   const { tools } = await agent.client.listTools();
   const schema = JSON.stringify(tools.find((t) => t.name === "widget_add")?.inputSchema);
@@ -121,15 +158,15 @@ test("the widget_add schema names every Widget type", async ({ agent }) => {
 test("an added chart shows on its Dashboard", async ({ agent }) => {
   const area = await seedFinance(agent);
   await agent.call("widget_add", { parent: { dashboard: "finance" }, widget: chart("amount") });
-  const dashboard = await agent.call("get_dashboard", { dashboard: area.id });
+  const dashboard = await agent.call("dashboard_get", { dashboard: area.id });
   expect(dashboard.body.widgets).toMatchObject([
     { type: "chart", projection: { from: "expenses" } },
   ]);
 });
 
-test("query returns the appended rows", async ({ agent }) => {
+test("projection_query returns the appended rows", async ({ agent }) => {
   await seedFinance(agent);
-  const result = await agent.call("query", {
+  const result = await agent.call("projection_query", {
     projection: { from: "expenses", sort: [{ column: "date" }] },
   });
   expect(result.body.rows.map((r: { amount: number }) => r.amount)).toEqual([42.1, 900]);
@@ -343,7 +380,7 @@ test("a second Agent appending the same Key fails with conflict naming the row",
 
 test("a write into an Archived subtree fails with archived", async ({ agent, other }) => {
   const area = await seedFinance(agent);
-  await other.call("archive", { kind: "dashboard", id: area.id, expectedVersion: 1 });
+  await other.call("item_archive", { kind: "dashboard", id: area.id, expectedVersion: 1 });
   const result = await agent.call("widget_add", {
     parent: { dashboard: area.id },
     widget: { type: "note", config: { markdown: "x" } },
@@ -392,13 +429,13 @@ test("a Widget moves into a section", async ({ agent }) => {
     parent: { dashboard: "finance" },
     widget: { type: "note", config: { markdown: "x" } },
   });
-  await agent.call("move", {
+  await agent.call("item_move", {
     kind: "widget",
     id: note.body.id,
     expectedVersion: 1,
     parent: { widget: section.body.id },
   });
-  const dashboard = await agent.call("get_dashboard", { dashboard: "finance" });
+  const dashboard = await agent.call("dashboard_get", { dashboard: "finance" });
   expect(dashboard.body.widgets).toMatchObject([{ type: "section", children: [{ type: "note" }] }]);
 });
 
@@ -407,21 +444,21 @@ test.for([
   ["a Widget to a path", { kind: "widget", parent: "finance" }],
 ] as const)("moving %s fails with invalid", async ([, input], { agent }) => {
   const area = await seedFinance(agent);
-  const result = await agent.call("move", { id: area.id, expectedVersion: 1, ...input });
+  const result = await agent.call("item_move", { id: area.id, expectedVersion: 1, ...input });
   expect(result.body).toMatchObject({ code: "invalid", issues: [{ path: ["parent"] }] });
 });
 
-test("list_archived lists the Archived rows of a Data Store", async ({ agent }) => {
+test("archive_list lists the Archived rows of a Data Store", async ({ agent }) => {
   await seedFinance(agent);
-  await agent.call("archive", { kind: "row", store: "expenses", id: 1, expectedVersion: 1 });
-  const archived = await agent.call("list_archived", { store: "expenses" });
+  await agent.call("item_archive", { kind: "row", store: "expenses", id: 1, expectedVersion: 1 });
+  const archived = await agent.call("archive_list", { store: "expenses" });
   expect(archived.body.rows).toMatchObject([{ id: 1 }]);
 });
 
 test("an Archived row is restored", async ({ agent }) => {
   await seedFinance(agent);
-  await agent.call("archive", { kind: "row", store: "expenses", id: 1, expectedVersion: 1 });
-  const restored = await agent.call("restore", {
+  await agent.call("item_archive", { kind: "row", store: "expenses", id: 1, expectedVersion: 1 });
+  const restored = await agent.call("item_restore", {
     kind: "row",
     store: "expenses",
     id: 1,
@@ -434,26 +471,26 @@ test.for([
   ["a row without its Data Store", { kind: "row", id: 1 }, ["store"]],
   ["a Dashboard with a number id", { kind: "dashboard", id: 1 }, ["id"]],
 ] as const)("archiving %s fails with invalid", async ([, ref, path], { agent }) => {
-  const result = await agent.call("archive", { ...ref, expectedVersion: 1 });
+  const result = await agent.call("item_archive", { ...ref, expectedVersion: 1 });
   expect(result.body).toMatchObject({ code: "invalid", issues: [{ path }] });
 });
 
-test("list_archived lists an Archived Data Store", async ({ agent }) => {
+test("archive_list lists an Archived Data Store", async ({ agent }) => {
   await seedFinance(agent);
-  const [store] = (await agent.call("list_stores")).body;
-  await agent.call("archive", { kind: "store", id: store.id, expectedVersion: 1 });
-  expect((await agent.call("list_archived")).body.stores).toMatchObject([{ name: "expenses" }]);
+  const [store] = (await agent.call("store_list")).body;
+  await agent.call("item_archive", { kind: "store", id: store.id, expectedVersion: 1 });
+  expect((await agent.call("archive_list")).body.stores).toMatchObject([{ name: "expenses" }]);
 });
 
 test("a restored Data Store is live again", async ({ agent }) => {
   await seedFinance(agent);
-  const [store] = (await agent.call("list_stores")).body;
-  await agent.call("archive", { kind: "store", id: store.id, expectedVersion: 1 });
-  await agent.call("restore", { kind: "store", id: store.id, expectedVersion: 2 });
-  expect((await agent.call("list_stores")).body).toMatchObject([{ name: "expenses" }]);
+  const [store] = (await agent.call("store_list")).body;
+  await agent.call("item_archive", { kind: "store", id: store.id, expectedVersion: 1 });
+  await agent.call("item_restore", { kind: "store", id: store.id, expectedVersion: 2 });
+  expect((await agent.call("store_list")).body).toMatchObject([{ name: "expenses" }]);
 });
 
-test("list_archived lists the Archived columns of a Data Store", async ({ agent }) => {
+test("archive_list lists the Archived columns of a Data Store", async ({ agent }) => {
   await seedFinance(agent);
   await agent.call("store_alter", {
     store: "expenses",
@@ -463,7 +500,7 @@ test("list_archived lists the Archived columns of a Data Store", async ({ agent 
       { op: "archive_column", column: "note" },
     ],
   });
-  const archived = await agent.call("list_archived", { store: "expenses" });
+  const archived = await agent.call("archive_list", { store: "expenses" });
   expect(archived.body.columns).toMatchObject([{ key: "note" }]);
 });
 
@@ -479,7 +516,7 @@ async function addColumns(agent: Agent, count: number): Promise<{ id: string; no
 
 test("a Widget cannot leave a columns Widget with 2 children", async ({ agent }) => {
   const { notes } = await addColumns(agent, 2);
-  const result = await agent.call("move", {
+  const result = await agent.call("item_move", {
     kind: "widget",
     id: notes[0],
     expectedVersion: 1,
@@ -490,22 +527,34 @@ test("a Widget cannot leave a columns Widget with 2 children", async ({ agent })
 
 test("a child of a columns Widget with 2 children cannot be Archived", async ({ agent }) => {
   const { notes } = await addColumns(agent, 2);
-  const result = await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
+  const result = await agent.call("item_archive", {
+    kind: "widget",
+    id: notes[0],
+    expectedVersion: 1,
+  });
   expect(result.body).toMatchObject({ code: "invalid", issues: [{ path: ["id"] }] });
 });
 
 test("archiving an Archived child of a columns Widget again changes nothing", async ({ agent }) => {
   const { notes } = await addColumns(agent, 3);
-  await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
-  const again = await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 2 });
+  await agent.call("item_archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
+  const again = await agent.call("item_archive", {
+    kind: "widget",
+    id: notes[0],
+    expectedVersion: 2,
+  });
   expect(again).toMatchObject({ isError: false, body: { version: 2 } });
 });
 
 test("a Widget cannot be restored into a columns Widget with 4 children", async ({ agent }) => {
   const { id, notes } = await addColumns(agent, 4);
-  await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
+  await agent.call("item_archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
   await agent.call("widget_add", { parent: { widget: id }, widget: note });
-  const result = await agent.call("restore", { kind: "widget", id: notes[0], expectedVersion: 2 });
+  const result = await agent.call("item_restore", {
+    kind: "widget",
+    id: notes[0],
+    expectedVersion: 2,
+  });
   expect(result.body).toMatchObject({ code: "invalid", issues: [{ path: ["id"] }] });
 });
 
@@ -519,7 +568,7 @@ test("rows_update writes values at the expected version", async ({ agent }) => {
 });
 
 test("an unknown Dashboard fails with not_found and no issues", async ({ agent }) => {
-  const result = await agent.call("get_dashboard", { dashboard: "nowhere" });
+  const result = await agent.call("dashboard_get", { dashboard: "nowhere" });
   expect(result).toMatchObject({ isError: true, body: { code: "not_found", issues: [] } });
 });
 
@@ -542,11 +591,13 @@ test("a checklist reads its items from a Projection", async ({ agent }) => {
   expect(result).toMatchObject({ isError: false, body: { type: "checklist" } });
 });
 
-test("get_tree lists the Area with its Widget count", async ({ agent }) => {
+test("dashboard_tree lists the Area with its Widget count", async ({ agent }) => {
   await seedFinance(agent);
   await agent.call("widget_add", {
     parent: { dashboard: "finance" },
     widget: { type: "note", config: { markdown: "x" } },
   });
-  expect((await agent.call("get_tree")).body).toMatchObject([{ path: "finance", widgetCount: 1 }]);
+  expect((await agent.call("dashboard_tree")).body).toMatchObject([
+    { path: "finance", widgetCount: 1 },
+  ]);
 });

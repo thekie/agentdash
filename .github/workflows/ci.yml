@@ -32,6 +32,9 @@ jobs:
           npx mcp-inspector --cli --transport http --server-url "$url" \
             --method initialize --connect-timeout 10000 --format json \
             | jq -e --arg name "$(node -p 'require("./package.json").name')" '.result.serverInfo.name == $name'
+          npx mcp-inspector --cli --transport http --server-url "$url" \
+            --method tools/list --connect-timeout 10000 --format json \
+            | jq -e '(.result.tools | length) == 16 and all(.result.tools[]; .title and .annotations.openWorldHint == false)'
       - run: npm run e2e
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
