@@ -100,18 +100,26 @@ test("the server lists 16 tools whose input schemas are objects", async ({ agent
   expect(tools.map((t) => t.inputSchema.type)).toEqual(Array(16).fill("object"));
 });
 
-test("every tool has a title and all four hints, and none is open-world", async ({ agent }) => {
+test("every tool has a title", async ({ agent }) => {
   const { tools } = await agent.client.listTools();
-  for (const { title, annotations } of tools) {
-    expect(title).toBeTruthy();
+  expect(tools.filter((t) => !t.title)).toEqual([]);
+});
+
+test("every tool sets all four hints", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  for (const { annotations } of tools) {
     expect(Object.keys(annotations ?? {}).sort()).toEqual([
       "destructiveHint",
       "idempotentHint",
       "openWorldHint",
       "readOnlyHint",
     ]);
-    expect(annotations?.openWorldHint).toBe(false);
   }
+});
+
+test("no tool is open-world", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  expect(tools.filter((t) => t.annotations?.openWorldHint !== false)).toEqual([]);
 });
 
 test("only the tools that overwrite values are destructive", async ({ agent }) => {

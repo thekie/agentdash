@@ -227,18 +227,18 @@ const widgetExamples = `Examples, one per type:
 {"type":"section","title":"Running","config":{},"children":[]}`;
 
 /**
- * The annotations of each kind of tool. A client may retry an idempotent call that lost its
- * connection, and a retried call with `expectedVersion` gets `conflict` instead of applying twice.
+ * The annotations of each kind of tool. A retried call with `expectedVersion` gets `conflict`
+ * instead of applying twice, so it is idempotent.
  */
 const effects = {
   read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   create: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-  versioned: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  reversible: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   overwrite: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
 } satisfies Record<string, ToolAnnotations>;
 
-/** Lets Claude Code return a result of up to 500,000 characters inline instead of in a file. */
-const largeResult = { "anthropic/maxResultSizeChars": 500_000 };
+/** The `_meta` that lets Claude Code show a result of up to 500,000 characters inline. */
+const largeResultMeta = { "anthropic/maxResultSizeChars": 500_000 };
 
 interface ToolSpec<S extends z.ZodType> {
   name: string;
@@ -246,9 +246,9 @@ interface ToolSpec<S extends z.ZodType> {
   description: string;
   effect: keyof typeof effects;
   input: S;
-  /** A flat schema to list instead of `input`, whose top-level union the Claude API rejects. */
+  /** A flat schema to list instead of `input`. */
   listing?: z.ZodType;
-  meta?: Record<string, unknown>;
+  isLargeResult?: boolean;
   run: (args: z.output<S>) => unknown;
 }
 
@@ -262,7 +262,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
         description: spec.description,
         inputSchema: unvalidated(spec.listing ?? spec.input),
         annotations: { ...effects[spec.effect], openWorldHint: false },
-        ...(spec.meta && { _meta: spec.meta }),
+        ...(spec.isLargeResult && { _meta: largeResultMeta }),
       },
       (args: unknown) => {
         try {
@@ -292,7 +292,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     input: z.strictObject({
       dashboard: z.string().describe("A Dashboard id or path such as finance/budget"),
     }),
-    meta: largeResult,
+    isLargeResult: true,
     run: ({ dashboard }) => storage.dashboard(dashboard),
   });
   tool({
@@ -308,7 +308,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     name: "archive_list",
     title: "List Archived items",
     description:
-      "Lists the Archived Dashboards, Widgets and Data Stores. With `store`, lists the Archived rows and columns of that Data Store instead. Use it to find something to bring back with restore.",
+      "Lists the Archived Dashboards, Widgets and Data Stores. With `store`, lists the Archived rows and columns of that Data Store instead. Use it to find something to bring back with item_restore.",
     effect: "read",
     input: z.strictObject({ store: z.string().optional() }),
     run: ({ store }) =>
@@ -323,7 +323,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
       "Runs a Projection over the Data Stores and returns `{ columns, rows, truncated }`. Use it to read rows, and to try a Projection before you bind a Widget to it. It returns at most `limit` rows (default 100, max 1,000), and `truncated` is true if there are more.",
     effect: "read",
     input: z.strictObject({ projection: Projection }),
-    meta: largeResult,
+    isLargeResult: true,
     run: ({ projection }) => storage.query(projection),
   });
 
@@ -378,7 +378,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     name: "widget_update",
     title: "Update a Widget",
     description:
-      "Replaces the title, config and Projection of a Widget. Its type and children stay, so send the whole Widget as dashboard_get returned it with your changes. Returns the Widget with its new version.",
+      "Replaces the title, config and Projection of a Widget. Its type and children stay. Send `type`, `title`, `config` and `projection` with your changes, without the id, version, timestamps or children that dashboard_get returns. Returns the Widget with its new version.",
     effect: "overwrite",
     input: z.strictObject({ id: z.string(), expectedVersion: Version, widget: WidgetFields }),
     run: ({ id, expectedVersion, widget }) => {
@@ -465,7 +465,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     title: "Move a Dashboard or Widget",
     description:
       "Moves a Dashboard under another one, or makes it an Area with a null parent. Moves a Widget with its subtree to a Dashboard or into a columns or section Widget. `position` orders it among its new siblings. Returns the moved item with its new version.",
-    effect: "versioned",
+    effect: "reversible",
     input: Move,
     listing: MoveListing,
     run: (input) => moveItem(storage, input),
@@ -475,7 +475,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     title: "Archive an item",
     description:
       "Archives a Dashboard, Widget, Data Store or row, which hides it and everything under it. Nothing is deleted: item_restore brings it back. Returns the Archived item.",
-    effect: "versioned",
+    effect: "reversible",
     input: ItemRef,
     listing: ItemRefListing,
     run: (ref) => archiveItem(storage, ref),
@@ -485,7 +485,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     title: "Restore an item",
     description:
       "Restores an Archived Dashboard, Widget, Data Store or row with what was under it. Find Archived items with archive_list. Returns the restored item.",
-    effect: "versioned",
+    effect: "reversible",
     input: ItemRef,
     listing: ItemRefListing,
     run: (ref) => restoreItem(storage, ref),
