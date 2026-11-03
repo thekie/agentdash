@@ -80,10 +80,11 @@ export type Projection = z.output<typeof Projection>;
 export type ProjectionInput = z.input<typeof Projection>;
 
 /**
- * Describes how a Projection names Data Stores and columns: by name and key as an Agent writes it,
- * or by id and physical name as a Widget stores it.
+ * Describes the two forms of a Projection. The readable form names Data Stores and columns by name
+ * and key, with filter values as rows are written. The stored form, which a Widget keeps, uses ids,
+ * physical column names and stored values.
  */
-export type ProjectionForm = "agent" | "stored";
+export type ProjectionForm = "readable" | "stored";
 
 /** Describes a Data Store that a Projection reads, with the alias of its table in the SQL. */
 export interface Source {
@@ -163,7 +164,7 @@ function addSource(r: Resolver, ref: string, path: Path): Source | undefined {
   }
   if (store.archivedAt !== null) {
     r.problems.push({ path, problem: `Data Store "${store.name}" is Archived` });
-    if (r.form === "agent") return undefined;
+    if (r.form === "readable") return undefined;
   }
   const source: Source = { alias: `t${r.sources.length}`, store };
   r.sources.push(source);
@@ -171,7 +172,7 @@ function addSource(r: Resolver, ref: string, path: Path): Source | undefined {
 }
 
 function nameOf(form: ProjectionForm, source: Source): string {
-  return form === "agent" ? source.store.name : source.store.id;
+  return form === "readable" ? source.store.name : source.store.id;
 }
 
 function sourceOf(r: Resolver, ref: string): { source: Source | undefined; column: string } {
@@ -428,7 +429,7 @@ function addOutputProblems(r: Resolver, outputs: Output[], projection: Projectio
 }
 
 /**
- * Returns the Projection with every reference resolved, and the problems in it. In Agent form the
+ * Returns the Projection with every reference resolved, and the problems in it. In readable form the
  * Projection is `undefined` if a reference is unknown. In stored form an Archived Data Store or
  * column is a problem, and the Projection is still returned.
  */
@@ -444,7 +445,7 @@ export function resolveProjection(
   const outputs = resolveSelect(r, projection);
   addOutputProblems(r, outputs, projection);
   const [from, ...joined] = r.sources;
-  if (!from || (form === "agent" && r.problems.length > 0)) {
+  if (!from || (form === "readable" && r.problems.length > 0)) {
     return { problems: r.problems };
   }
   const resolved: ResolvedProjection = {
@@ -461,13 +462,13 @@ export function resolveProjection(
 }
 
 function refIn(form: ProjectionForm, p: ResolvedProjection, ref: Ref): string {
-  const column = form === "agent" ? ref.column.key : ref.column.physical;
+  const column = form === "readable" ? ref.column.key : ref.column.physical;
   return ref.source === p.sources[0] ? column : `${nameOf(form, ref.source)}.${column}`;
 }
 
 function filterIn(form: ProjectionForm, p: ResolvedProjection, filter: ResolvedFilter) {
   const column = refIn(form, p, filter.ref);
-  const value = (v: StoredValue) => (form === "agent" ? formatValue(filter.ref.column, v) : v);
+  const value = (v: StoredValue) => (form === "readable" ? formatValue(filter.ref.column, v) : v);
   if (!("value" in filter) && !("values" in filter)) return { column, op: filter.op };
   if ("values" in filter) return { column, op: filter.op, values: filter.values.map(value) };
   const written = isRelative(filter.value) ? filter.value : value(filter.value);
@@ -491,7 +492,7 @@ function nonEmpty<T>(items: T[]): T[] | undefined {
 }
 
 /**
- * Returns the Projection as JSON in `form`. Agent form names Data Stores and columns by their
+ * Returns the Projection as JSON in `form`. Readable form names Data Stores and columns by their
  * current names and keys, so a renamed column shows its new key.
  */
 export function formatProjection(p: ResolvedProjection, form: ProjectionForm): unknown {
@@ -508,7 +509,8 @@ export function formatProjection(p: ResolvedProjection, form: ProjectionForm): u
                 type: s.join.type,
                 on: {
                   left: refIn(form, p, s.join.left),
-                  right: form === "agent" ? s.join.right.column.key : s.join.right.column.physical,
+                  right:
+                    form === "readable" ? s.join.right.column.key : s.join.right.column.physical,
                 },
               },
             ]
@@ -538,7 +540,7 @@ export function storesRead(stored: Projection): string[] {
  * Returns a Projection that an Agent wrote, with every reference resolved. Returns `undefined` if
  * the Projection has problems, after it adds each one to `issues` with `path` in front.
  */
-export function resolveAgentProjection(
+export function resolveReadableProjection(
   db: Database,
   input: unknown,
   path: Path,
@@ -551,7 +553,7 @@ export function resolveAgentProjection(
     }
     return undefined;
   }
-  const { projection, problems } = resolveProjection(db, parsed.data, "agent");
+  const { projection, problems } = resolveProjection(db, parsed.data, "readable");
   issues.push(...problems.map((p) => ({ ...p, path: [...path, ...p.path] })));
   return problems.length === 0 ? projection : undefined;
 }
@@ -566,7 +568,7 @@ export function storedProjection(
   path: Path,
   issues: Issue[],
 ): Projection | undefined {
-  const projection = resolveAgentProjection(db, input, path, issues);
+  const projection = resolveReadableProjection(db, input, path, issues);
   return projection && Projection.parse(formatProjection(projection, "stored"));
 }
 
@@ -577,7 +579,7 @@ export interface Broken {
 }
 
 /**
- * Returns a stored Projection in Agent form, and why it is broken if it reads an Archived Data Store
+ * Returns a stored Projection in readable form, and why it is broken if it reads an Archived Data Store
  * or column, or if a slot or sort names an output column that is missing.
  */
 export function presentProjection(
@@ -590,6 +592,6 @@ export function presentProjection(
     reason: problem.problem,
     ...(problem.missingColumn !== undefined && { missingColumn: problem.missingColumn }),
   };
-  const written = projection ? formatProjection(projection, "agent") : stored;
+  const written = projection ? formatProjection(projection, "readable") : stored;
   return broken ? { projection: written, broken } : { projection: written };
 }

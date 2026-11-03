@@ -85,7 +85,7 @@ export interface Widget {
   type: string;
   title: string | null;
   config: unknown;
-  /** The Projection in Agent form, with the current names of its Data Stores and columns. */
+  /** The Projection in readable form, with the current names of its Data Stores and columns. */
   projection: unknown;
   /** The reason the Widget cannot read its Data Stores. It is missing if the Widget works. */
   broken?: Broken;
