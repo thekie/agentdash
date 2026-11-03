@@ -2,6 +2,7 @@ import type {
   CallToolResult,
   McpServer,
   StandardSchemaWithJSON,
+  ToolAnnotations,
 } from "@modelcontextprotocol/server";
 import { ZodError, z } from "zod";
 import {
@@ -53,8 +54,9 @@ const ItemRef = z.discriminatedUnion("kind", [
 ]);
 type ItemRef = z.output<typeof ItemRef>;
 
-// MCP clients reject a tool whose input schema has a union at the top, so `archive`, `restore` and
-// `move` list these flat schemas and parse with the unions above.
+// The Claude API rejects a request with a tool whose input schema has a union at the top, so
+// `item_archive`, `item_restore` and `item_move` list these flat schemas and parse with the unions
+// above.
 const ItemRefListing = z.strictObject({
   kind: z.enum(["dashboard", "widget", "store", "row"]),
   id: z.union([z.string(), z.int()]).describe("A row id is a number. Every other id is a string."),
@@ -224,78 +226,114 @@ const widgetExamples = `Examples, one per type:
 {"type":"columns","config":{},"children":[{"type":"note","config":{"markdown":"left"}},{"type":"note","config":{"markdown":"right"}}]}
 {"type":"section","title":"Running","config":{},"children":[]}`;
 
+/**
+ * The annotations of each kind of tool. A retried call with `expectedVersion` gets `conflict`
+ * instead of applying twice, so it is idempotent.
+ */
+const effects = {
+  read: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  create: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  reversible: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  overwrite: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+} satisfies Record<string, ToolAnnotations>;
+
+/** The `_meta` that lets Claude Code show a result of up to 500,000 characters inline. */
+const largeResultMeta = { "anthropic/maxResultSizeChars": 500_000 };
+
+interface ToolSpec<S extends z.ZodType> {
+  name: string;
+  title: string;
+  description: string;
+  effect: keyof typeof effects;
+  input: S;
+  /** A flat schema to list instead of `input`. */
+  listing?: z.ZodType;
+  isLargeResult?: boolean;
+  run: (args: z.output<S>) => unknown;
+}
+
 /** Registers the tools that Agents read and write Dashboards, Widgets and Data Stores with. */
 export function registerTools(server: McpServer, storage: Storage): void {
-  const tool = <S extends z.ZodType>(
-    name: string,
-    description: string,
-    input: S,
-    run: (args: z.output<S>) => unknown,
-    options: { isReadOnly?: boolean; listing?: z.ZodType } = {},
-  ) =>
+  const tool = <S extends z.ZodType>(spec: ToolSpec<S>) =>
     server.registerTool(
-      name,
+      spec.name,
       {
-        description,
-        inputSchema: unvalidated(options.listing ?? input),
-        annotations: { readOnlyHint: options.isReadOnly ?? false },
+        title: spec.title,
+        description: spec.description,
+        inputSchema: unvalidated(spec.listing ?? spec.input),
+        annotations: { ...effects[spec.effect], openWorldHint: false },
+        ...(spec.isLargeResult && { _meta: largeResultMeta }),
       },
       (args: unknown) => {
         try {
-          return toolResult(run(input.parse(args)));
+          return toolResult(spec.run(spec.input.parse(args)));
         } catch (error) {
           return errorResult(error);
         }
       },
     );
   const noInput = z.strictObject({});
-  const readOnly = { isReadOnly: true };
 
-  tool(
-    "get_tree",
-    "Lists every live Dashboard with its path and its Widget, child and broken-Widget counts.",
-    noInput,
-    () => storage.tree(),
-    readOnly,
-  );
-  tool(
-    "get_dashboard",
-    "Returns a Dashboard with its full Widget tree, configs and Projections. A Widget that cannot read its Data Stores has `broken`.",
-    z.strictObject({
+  tool({
+    name: "dashboard_tree",
+    title: "List Dashboards",
+    description:
+      "Lists every live Dashboard as a flat list with its id, path, title and parent, and the counts of its Widgets, child Dashboards and broken Widgets. Call it first in a session to see what exists before you create anything. Use a path or id from it to call dashboard_get.",
+    effect: "read",
+    input: noInput,
+    run: () => storage.tree(),
+  });
+  tool({
+    name: "dashboard_get",
+    title: "Get a Dashboard",
+    description:
+      "Returns one Dashboard with its full Widget tree, each Widget's id, version, config and Projection. Use it before you change or add Widgets, and after a call that got no reply. A Widget that cannot read its Data Stores carries `broken` with the reason.",
+    effect: "read",
+    input: z.strictObject({
       dashboard: z.string().describe("A Dashboard id or path such as finance/budget"),
     }),
-    ({ dashboard }) => storage.dashboard(dashboard),
-    readOnly,
-  );
-  tool(
-    "list_stores",
-    "Lists every live Data Store with its columns, Key, row count and the Widgets that read it.",
-    noInput,
-    () => storage.stores(),
-    readOnly,
-  );
-  tool(
-    "list_archived",
-    "Lists the Archived Dashboards, Widgets and Data Stores. With `store`, lists the Archived rows and columns of that Data Store.",
-    z.strictObject({ store: z.string().optional() }),
-    ({ store }) =>
+    isLargeResult: true,
+    run: ({ dashboard }) => storage.dashboard(dashboard),
+  });
+  tool({
+    name: "store_list",
+    title: "List Data Stores",
+    description:
+      "Lists every live Data Store with its id, version, columns, Key, row count and the Widgets that read it. Use it to find a Data Store to append rows to or to bind a Widget to. It returns no rows: read them with projection_query.",
+    effect: "read",
+    input: noInput,
+    run: () => storage.stores(),
+  });
+  tool({
+    name: "archive_list",
+    title: "List Archived items",
+    description:
+      "Lists the Archived Dashboards, Widgets and Data Stores. With `store`, lists the Archived rows and columns of that Data Store instead. Use it to find something to bring back with item_restore.",
+    effect: "read",
+    input: z.strictObject({ store: z.string().optional() }),
+    run: ({ store }) =>
       store === undefined
         ? storage.archived()
         : { rows: storage.archivedRows(store), columns: storage.store(store).archivedColumns },
-    readOnly,
-  );
-  tool(
-    "query",
-    "Runs a Projection and returns its columns and rows, at most `limit` (default 100, max 1,000). `truncated` is true if there are more.",
-    z.strictObject({ projection: Projection }),
-    ({ projection }) => storage.query(projection),
-    readOnly,
-  );
+  });
+  tool({
+    name: "projection_query",
+    title: "Query Data Stores",
+    description:
+      "Runs a Projection over the Data Stores and returns `{ columns, rows, truncated }`. Use it to read rows, and to try a Projection before you bind a Widget to it. It returns at most `limit` rows (default 100, max 1,000), and `truncated` is true if there are more.",
+    effect: "read",
+    input: z.strictObject({ projection: Projection }),
+    isLargeResult: true,
+    run: ({ projection }) => storage.query(projection),
+  });
 
-  tool(
-    "dashboard_create",
-    "Creates a Dashboard under `parent`, or an Area without one. The slug comes from the title unless given.",
-    z.strictObject({
+  tool({
+    name: "dashboard_create",
+    title: "Create a Dashboard",
+    description:
+      "Creates a Dashboard under `parent`, or an Area (a top-level Dashboard such as Finance) without one. The slug comes from the title unless given, and a taken slug fails with `conflict` and returns the existing Dashboard. Returns the new Dashboard with its id, path and version.",
+    effect: "create",
+    input: z.strictObject({
       parent: z.string().optional().describe("A Dashboard id or path"),
       title: z.string().min(1),
       slug: z.string().optional(),
@@ -303,12 +341,15 @@ export function registerTools(server: McpServer, storage: Storage): void {
       description: z.string().optional(),
       position: Position.optional(),
     }),
-    (input) => storage.createDashboard(input),
-  );
-  tool(
-    "dashboard_update",
-    "Changes the given fields of a Dashboard. A new title keeps the old slug.",
-    z.strictObject({
+    run: (input) => storage.createDashboard(input),
+  });
+  tool({
+    name: "dashboard_update",
+    title: "Update a Dashboard",
+    description:
+      "Changes the given fields of a Dashboard and keeps the others. A new title keeps the old slug, so the path changes only with a new slug. Use item_move to put it under another parent. Returns the Dashboard with its new version.",
+    effect: "overwrite",
+    input: z.strictObject({
       dashboard: z.string().describe("A Dashboard id or path"),
       expectedVersion: Version,
       title: z.string().min(1).optional(),
@@ -316,26 +357,31 @@ export function registerTools(server: McpServer, storage: Storage): void {
       icon: z.string().nullable().optional(),
       description: z.string().nullable().optional(),
     }),
-    ({ dashboard, ...rest }) => storage.updateDashboard({ id: dashboard, ...rest }),
-  );
+    run: ({ dashboard, ...rest }) => storage.updateDashboard({ id: dashboard, ...rest }),
+  });
 
-  tool(
-    "widget_add",
-    `Adds a Widget with its whole subtree to a Dashboard or to a columns or section Widget. Data Widgets read a Data Store through \`projection\`, whose \`slots\` name output columns.\n${widgetExamples}`,
-    z.strictObject({ parent: WidgetParent, widget: Widget, position: Position.optional() }),
-    (input) => {
+  tool({
+    name: "widget_add",
+    title: "Add a Widget",
+    description: `Adds a Widget with its whole subtree to a Dashboard or to a columns or section Widget. Data Widgets read a Data Store through \`projection\`, whose \`slots\` name output columns. A retried call adds a second Widget, so after a call with no reply, check with dashboard_get first. Returns the Widget tree with ids and versions.\n${widgetExamples}`,
+    effect: "create",
+    input: z.strictObject({ parent: WidgetParent, widget: Widget, position: Position.optional() }),
+    run: (input) => {
       assertNoIssues([
         ...addIssues(storage, input.parent),
         ...widgetIssues(storage, input.widget, ["widget"]),
       ]);
       return storage.addWidget(input);
     },
-  );
-  tool(
-    "widget_update",
-    "Replaces the title, config and Projection of a Widget. Its type and children stay.",
-    z.strictObject({ id: z.string(), expectedVersion: Version, widget: WidgetFields }),
-    ({ id, expectedVersion, widget }) => {
+  });
+  tool({
+    name: "widget_update",
+    title: "Update a Widget",
+    description:
+      "Replaces the title, config and Projection of a Widget. Its type and children stay. Send `type`, `title`, `config` and `projection` with your changes, without the id, version, timestamps or children that dashboard_get returns. Returns the Widget with its new version.",
+    effect: "overwrite",
+    input: z.strictObject({ id: z.string(), expectedVersion: Version, widget: WidgetFields }),
+    run: ({ id, expectedVersion, widget }) => {
       assertNoIssues([
         ...typeChangeIssues(storage.widget(id).type, widget.type),
         ...widgetIssues(storage, widget, ["widget"]),
@@ -349,44 +395,56 @@ export function registerTools(server: McpServer, storage: Storage): void {
         projection: "projection" in widget ? widget.projection : undefined,
       });
     },
-  );
+  });
 
-  tool(
-    "store_create",
-    "Creates a Data Store. Column types: text, number (format, unit), money (currency), date, datetime (timezone), boolean, enum (options).",
-    z.strictObject({
+  tool({
+    name: "store_create",
+    title: "Create a Data Store",
+    description:
+      "Creates a Data Store, a table for numbers and records that Widgets read. Column types: text, number (format, unit), money (currency), date, datetime (timezone), boolean, enum (options). Give it a Key when rows have a natural identity, such as the date of a weight log, so a retried append cannot add a row twice. A taken name fails with `conflict` and returns the existing Data Store.",
+    effect: "create",
+    input: z.strictObject({
       name: z.string().min(1),
       columns: z.array(ColumnSpec).min(1),
       key: z.array(ColumnKey).optional(),
     }),
-    (input) => storage.createStore(input),
-  );
-  tool(
-    "store_alter",
-    "Applies ops to a Data Store in order, all or none. With `dryRun`, reports unconvertible values and Key duplicates and changes nothing.",
-    z.strictObject({
+    run: (input) => storage.createStore(input),
+  });
+  tool({
+    name: "store_alter",
+    title: "Alter a Data Store",
+    description:
+      "Applies ops to the columns and Key of a Data Store in order, all or none: add, rename, retype, archive or restore a column, set the Key, or set enum options. A retype rewrites existing values. With `dryRun`, it reports unconvertible values and Key duplicates and changes nothing. Returns the Data Store with its new version.",
+    effect: "overwrite",
+    input: z.strictObject({
       store: z.string(),
       expectedVersion: Version,
       ops: z.array(AlterOp).min(1),
       dryRun: z.boolean().optional(),
     }),
-    (input) => storage.alterStore(input),
-  );
+    run: (input) => storage.alterStore(input),
+  });
 
-  tool(
-    "rows_append",
-    "Appends up to 1,000 rows, keyed by column key, all or none. If a row's Key matches a live row, `onConflict` decides: error (default), update or skip.",
-    z.strictObject({
+  tool({
+    name: "rows_append",
+    title: "Append rows",
+    description:
+      "Appends up to 1,000 rows to a Data Store, all or none, each row an object keyed by column key. If a row's Key matches a live row, `onConflict` decides: error (default), update or skip. Without a Key, a retried call appends the rows again. Returns the ids of the inserted, updated and skipped rows.",
+    effect: "create",
+    input: z.strictObject({
       store: z.string(),
       rows: z.array(z.record(z.string(), z.unknown())).min(1).max(1000),
       onConflict: z.enum(["error", "update", "skip"]).optional(),
     }),
-    (input) => storage.appendRows(input),
-  );
-  tool(
-    "rows_update",
-    "Writes the given values of up to 1,000 rows, all or none. Other columns keep their values.",
-    z.strictObject({
+    run: (input) => storage.appendRows(input),
+  });
+  tool({
+    name: "rows_update",
+    title: "Update rows",
+    description:
+      'Writes the given values of up to 1,000 rows by id, all or none, and keeps the other columns. Row ids come from rows_append. To change a row of a Data Store with a Key, rows_append with onConflict "update" needs no id or version. Returns the rows with their new versions.',
+    effect: "overwrite",
+    input: z.strictObject({
       store: z.string(),
       rows: z
         .array(
@@ -399,28 +457,37 @@ export function registerTools(server: McpServer, storage: Storage): void {
         .min(1)
         .max(1000),
     }),
-    (input) => storage.updateRows(input),
-  );
+    run: (input) => storage.updateRows(input),
+  });
 
-  tool(
-    "move",
-    "Moves a Dashboard under another one, or a Widget with its subtree to a Dashboard or layout Widget.",
-    Move,
-    (input) => moveItem(storage, input),
-    { listing: MoveListing },
-  );
-  tool(
-    "archive",
-    "Archives a Dashboard, Widget, Data Store or row, which hides everything under it.",
-    ItemRef,
-    (ref) => archiveItem(storage, ref),
-    { listing: ItemRefListing },
-  );
-  tool(
-    "restore",
-    "Restores an Archived Dashboard, Widget, Data Store or row.",
-    ItemRef,
-    (ref) => restoreItem(storage, ref),
-    { listing: ItemRefListing },
-  );
+  tool({
+    name: "item_move",
+    title: "Move a Dashboard or Widget",
+    description:
+      "Moves a Dashboard under another one, or makes it an Area with a null parent. Moves a Widget with its subtree to a Dashboard or into a columns or section Widget. `position` orders it among its new siblings. Returns the moved item with its new version.",
+    effect: "reversible",
+    input: Move,
+    listing: MoveListing,
+    run: (input) => moveItem(storage, input),
+  });
+  tool({
+    name: "item_archive",
+    title: "Archive an item",
+    description:
+      "Archives a Dashboard, Widget, Data Store or row, which hides it and everything under it. Nothing is deleted: item_restore brings it back. Returns the Archived item.",
+    effect: "reversible",
+    input: ItemRef,
+    listing: ItemRefListing,
+    run: (ref) => archiveItem(storage, ref),
+  });
+  tool({
+    name: "item_restore",
+    title: "Restore an item",
+    description:
+      "Restores an Archived Dashboard, Widget, Data Store or row with what was under it. Find Archived items with archive_list. Returns the restored item.",
+    effect: "reversible",
+    input: ItemRef,
+    listing: ItemRefListing,
+    run: (ref) => restoreItem(storage, ref),
+  });
 }
