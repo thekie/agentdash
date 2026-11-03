@@ -12,8 +12,8 @@ import { createWebApi } from "./web-api.ts";
 export const serverInfo = { name: pkg.name, version: pkg.version };
 
 /**
- * Creates the HTTP app, with the MCP tools over `storage` at `/mcp`, the reads of the web UI at `/api`, and the web UI from `webRoot`, an
- * absolute path. `close` stops the MCP handler.
+ * Creates the HTTP app over `storage`: the MCP tools at `/mcp`, the reads of the web UI at `/api`,
+ * and the web UI from `webRoot`, an absolute path. `close` stops the MCP handler.
  */
 export function createApp(webRoot: string, storage: Storage) {
   const createServer = () => {

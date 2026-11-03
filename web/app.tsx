@@ -276,16 +276,17 @@ function EmptyState() {
 export function App() {
   const path = useSyncExternalStore(subscribeToHistory, currentPath);
   const tree = useJson<DashboardSummary[]>("/api/tree");
-  const first = tree === undefined || tree === "missing" ? undefined : tree[0];
+  const dashboards = tree === "missing" ? undefined : tree;
+  const first = dashboards?.[0];
   useEffect(() => {
     if (path === "" && first) navigate(first.path, { replace: true });
   }, [path, first]);
-  if (tree === undefined || tree === "missing") return null;
+  if (!dashboards) return null;
   if (!first) return <EmptyState />;
   return (
     <div className="app">
-      <Sidebar tree={tree} path={path} />
-      <main>{path && <DashboardPage tree={tree} path={path} />}</main>
+      <Sidebar tree={dashboards} path={path} />
+      <main>{path && <DashboardPage tree={dashboards} path={path} />}</main>
     </div>
   );
 }
