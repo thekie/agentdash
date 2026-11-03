@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import { HOST } from "./src/options.ts";
 
 const port = 4399;
+/** The URL of a second server whose data directory holds no Dashboards. */
+export const emptyServerUrl = `http://${HOST}:${port + 1}`;
 
 export default defineConfig({
   testDir: "e2e",
@@ -13,9 +15,16 @@ export default defineConfig({
   // biome-ignore lint/style/useNamingConvention: Playwright sets the name of this option.
   use: { baseURL: `http://${HOST}:${port}`, trace: "on-first-retry" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: `rm -rf .data/e2e && node src/main.ts --port ${port} --data-dir .data/e2e`,
-    url: `http://${HOST}:${port}`,
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: `rm -rf .data/e2e && node e2e/seed.ts .data/e2e && node src/main.ts --port ${port} --data-dir .data/e2e`,
+      url: `http://${HOST}:${port}`,
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: `rm -rf .data/e2e-empty && node src/main.ts --port ${port + 1} --data-dir .data/e2e-empty`,
+      url: emptyServerUrl,
+      reuseExistingServer: !process.env.CI,
+    },
+  ],
 });
