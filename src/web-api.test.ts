@@ -26,7 +26,7 @@ function seedFinance(storage: Storage) {
           projection: {
             from: "spending",
             aggregate: [{ op: "sum", column: "amount", as: "total" }],
-            slots: { value: "total" },
+            slots: { y: "total" },
           },
         },
       ],
@@ -69,3 +69,35 @@ test.for(["/dashboards/missing", "/dashboards/finance/budget", "/unknown"])(
     expect((await createWebApi(storage).request(path)).status).toBe(404);
   },
 );
+
+function addLink(storage: Storage, dashboardId: string) {
+  storage.addWidget({
+    parent: { dashboard: "finance" },
+    widget: { type: "dashboardLink", config: { dashboardId } },
+  });
+}
+
+test("a Dashboard link carries the live Dashboard it points at", async ({ storage }) => {
+  seedFinance(storage);
+  const budget = storage.dashboard("finance/budget");
+  storage.updateDashboard({ id: budget.id, expectedVersion: budget.version, description: "Plan" });
+  addLink(storage, budget.id);
+  const [link] = (await (await createWebApi(storage).request("/dashboards/finance")).json())
+    .widgets;
+  expect(link.target).toEqual({
+    path: "finance/budget",
+    title: "Budget",
+    icon: null,
+    description: "Plan",
+  });
+});
+
+test("a Dashboard link to an Archived Dashboard carries no target", async ({ storage }) => {
+  seedFinance(storage);
+  const budget = storage.dashboard("finance/budget");
+  addLink(storage, budget.id);
+  storage.archiveDashboard({ id: budget.id, expectedVersion: budget.version });
+  const [link] = (await (await createWebApi(storage).request("/dashboards/finance")).json())
+    .widgets;
+  expect(link).not.toHaveProperty("target");
+});

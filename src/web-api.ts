@@ -1,14 +1,28 @@
 import { Hono } from "hono";
-import { Projection, type Storage, StorageError } from "./storage/storage.ts";
+import { WidgetFields } from "./catalog.ts";
+import { type Storage, StorageError } from "./storage/storage.ts";
 
-type Widget = ReturnType<Storage["dashboard"]>["widgets"][number];
+type StoredWidget = ReturnType<Storage["dashboard"]>["widgets"][number];
 
-/** Describes a Widget as the web UI draws it, with the rows its Projection reads. */
-export interface WidgetView extends Omit<Widget, "children"> {
-  /** The rows of the Projection. It is missing if the Widget has no Projection or is broken. */
+/** Describes the live Dashboard that a `dashboardLink` Widget points at. */
+export type LinkTarget = Pick<
+  ReturnType<Storage["dashboard"]>,
+  "path" | "title" | "icon" | "description"
+>;
+
+/**
+ * Describes a Widget as the web UI draws it. `result` holds the rows of its Projection and is
+ * missing if the Widget has no Projection or is broken. `target` is missing if the Dashboard that a
+ * `dashboardLink` points at is not live.
+ */
+export type WidgetView = WidgetFields & {
+  id: string;
+  updatedAt: string;
+  broken?: NonNullable<StoredWidget["broken"]>;
   result?: ReturnType<Storage["query"]>;
+  target?: LinkTarget;
   children: WidgetView[];
-}
+};
 
 /** Describes a Dashboard as the web UI draws it. */
 export interface DashboardView extends Omit<ReturnType<Storage["dashboard"]>, "widgets"> {
@@ -18,10 +32,36 @@ export interface DashboardView extends Omit<ReturnType<Storage["dashboard"]>, "w
 /** Describes the sidebar entry of a Dashboard. */
 export type DashboardSummary = ReturnType<Storage["tree"]>[number];
 
-function widgetView(storage: Storage, widget: Widget): WidgetView {
-  const children = widget.children.map((child) => widgetView(storage, child));
-  if (widget.projection === null || widget.broken) return { ...widget, children };
-  return { ...widget, result: storage.query(Projection.parse(widget.projection)), children };
+function linkTarget(storage: Storage, id: string): { target?: LinkTarget } {
+  try {
+    const { path, title, icon, description } = storage.dashboard(id);
+    return { target: { path, title, icon, description } };
+  } catch (error) {
+    if (error instanceof StorageError) return {};
+    throw error;
+  }
+}
+
+function widgetView(storage: Storage, widget: StoredWidget): WidgetView {
+  const { id, type, title, config, projection, broken, updatedAt } = widget;
+  const fields = WidgetFields.parse({
+    type,
+    title: title ?? undefined,
+    config,
+    ...(projection !== null && { projection }),
+  });
+  const view: WidgetView = {
+    ...fields,
+    id,
+    updatedAt,
+    ...(broken && { broken }),
+    children: widget.children.map((child) => widgetView(storage, child)),
+  };
+  if (fields.type === "dashboardLink") {
+    return { ...view, ...linkTarget(storage, fields.config.dashboardId) };
+  }
+  if (!("projection" in fields) || fields.projection === undefined || broken) return view;
+  return { ...view, result: storage.query(fields.projection) };
 }
 
 /**
