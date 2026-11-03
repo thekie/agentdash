@@ -73,7 +73,7 @@ Plus Jakarta Sans (400, 500, 600, 700) for everything; JetBrains Mono only for c
 
 - **Sidebar:** a floating rounded panel (16px from the window edge, sticky). Wordmark, an "Areas" label, then the full Dashboard tree: Areas 44px tall and semibold, children 40px and indented 22px per level. The current Dashboard has `accent-soft` behind it. At the bottom, the connection card: **Live** (green dot), **Reconnecting…** (amber ring, "Showing the last data we received"), **Server stopped** (`bad-bg`, "Run `npx agentdash` to start it again").
 - **Header:** breadcrumb pills for parents (`panel` background), then icon tile, title, description and an "Updated 2h ago" pill. Absolute time on hover everywhere a relative time appears.
-- **Empty app:** one card with "No dashboards yet", a one-line prompt example and both connect commands (Claude Code, "or", Claude Desktop) in dark code blocks with Copy buttons, then a "Listening on 127.0.0.1:4242" status line.
+- **Empty app:** one card with "No dashboards yet", a one-line prompt example and both connect commands (Claude Code, "or", Claude Desktop) in dark code blocks with Copy buttons, then a "Listening on 127.0.0.1:4242. This page fills in by itself." status line. Without a connection, the connection card replaces that line.
 
 ## Widgets
 
@@ -98,4 +98,3 @@ Every leaf Widget shows its own relative timestamp at the top right (`ink-3`, 12
 ## Open
 
 - Icon per KPI (would need a config field in #5). Until then the generic glyph.
-- The connection card states, which wait for live updates.

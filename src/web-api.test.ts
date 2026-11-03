@@ -1,5 +1,5 @@
 import { expect } from "vitest";
-import { test } from "./storage/fixture.ts";
+import { failureOf, test } from "./storage/fixture.ts";
 import type { Storage } from "./storage/storage.ts";
 import { createWebApi } from "./web-api.ts";
 
@@ -76,6 +76,33 @@ function addLink(storage: Storage, dashboardId: string) {
     widget: { type: "dashboardLink", config: { dashboardId } },
   });
 }
+
+async function openEvents(storage: Storage) {
+  const response = await createWebApi(storage).request("/events");
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("expected a stream");
+  const nextEvent = async () => new TextDecoder().decode((await reader.read()).value);
+  return { response, reader, nextEvent };
+}
+
+test("GET /events signals a write to every open stream", async ({ storage }) => {
+  const streams = [await openEvents(storage), await openEvents(storage)];
+  storage.createDashboard({ title: "Finance" });
+  for (const { response, reader, nextEvent } of streams) {
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(await nextEvent()).toBe("data: changed\n\n");
+    await reader.cancel();
+  }
+});
+
+test("GET /events signals nothing for a write that fails", async ({ storage }) => {
+  storage.createDashboard({ title: "Finance" });
+  const { reader, nextEvent } = await openEvents(storage);
+  expect(failureOf(() => storage.createDashboard({ title: "Finance" })).code).toBe("conflict");
+  const silence = new Promise((resolve) => setTimeout(resolve, 20, "silence"));
+  expect(await Promise.race([nextEvent(), silence])).toBe("silence");
+  await reader.cancel();
+});
 
 test("a Dashboard link carries the live Dashboard it points at", async ({ storage }) => {
   seedFinance(storage);

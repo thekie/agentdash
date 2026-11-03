@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { WidgetFields } from "./catalog.ts";
 import { type Storage, StorageError } from "./storage/storage.ts";
 
@@ -65,8 +66,9 @@ function widgetView(storage: Storage, widget: StoredWidget): WidgetView {
 }
 
 /**
- * Creates the read-only HTTP routes of the web UI: `GET /tree` and `GET /dashboards/<path>`. A
- * missing or Archived Dashboard answers 404.
+ * Creates the read-only HTTP routes of the web UI: `GET /tree`, `GET /dashboards/<path>` and
+ * `GET /events`. A missing or Archived Dashboard answers 404. `/events` is a server-sent event
+ * stream that sends `changed` after each write.
  */
 export function createWebApi(storage: Storage) {
   const api = new Hono();
@@ -79,6 +81,19 @@ export function createWebApi(storage: Storage) {
     };
     return c.json(view);
   });
+  api.get("/events", (c) =>
+    streamSSE(
+      c,
+      (stream) =>
+        new Promise<void>((resolve) => {
+          const unsubscribe = storage.subscribe(() => void stream.writeSSE({ data: "changed" }));
+          stream.onAbort(() => {
+            unsubscribe();
+            resolve();
+          });
+        }),
+    ),
+  );
   api.onError((error, c) => {
     if (error instanceof StorageError && ["not_found", "archived"].includes(error.code)) {
       return c.json({ error: error.message }, 404);

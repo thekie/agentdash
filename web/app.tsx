@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { DashboardSummary, DashboardView, WidgetView } from "../src/web-api.ts";
+import { type Connection, ConnectionCard, useLiveData } from "./connection.tsx";
 import { Link, navigate } from "./link.tsx";
 import { RelativeTime } from "./time.tsx";
 import { Widgets } from "./widgets.tsx";
@@ -10,9 +11,13 @@ const subscribeToHistory = (onChange: () => void) => {
   return () => removeEventListener("popstate", onChange);
 };
 
-/** `missing` stands for a 404, `undefined` for a read that has not finished. */
-function useJson<T>(url: string): T | "missing" | undefined {
+/**
+ * `missing` stands for a 404, `undefined` for a first read of `url` that has not finished. A new
+ * `revision` reads again and keeps the last value until the answer arrives.
+ */
+function useJson<T>(url: string, revision: number): T | "missing" | undefined {
   const [state, setState] = useState<{ url: string; value: T | "missing" }>();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `revision` only triggers another read.
   useEffect(() => {
     let isCurrent = true;
     void fetch(url).then(async (response) => {
@@ -23,7 +28,7 @@ function useJson<T>(url: string): T | "missing" | undefined {
     return () => {
       isCurrent = false;
     };
-  }, [url]);
+  }, [url, revision]);
   return state?.url === url ? state.value : undefined;
 }
 
@@ -42,7 +47,13 @@ const Mark = () => (
   </svg>
 );
 
-function Sidebar({ tree, path }: { tree: DashboardSummary[]; path: string }) {
+interface SidebarProps {
+  tree: DashboardSummary[];
+  path: string;
+  connection: Connection;
+}
+
+function Sidebar({ tree, path, connection }: SidebarProps) {
   return (
     <nav className="side" aria-label="Dashboards">
       <div className="brand">
@@ -67,6 +78,7 @@ function Sidebar({ tree, path }: { tree: DashboardSummary[]; path: string }) {
           );
         })}
       </div>
+      <ConnectionCard connection={connection} />
     </nav>
   );
 }
@@ -95,8 +107,14 @@ function Breadcrumbs({ tree, dashboard }: { tree: DashboardSummary[]; dashboard:
   );
 }
 
-function DashboardPage({ tree, path }: { tree: DashboardSummary[]; path: string }) {
-  const dashboard = useJson<DashboardView>(`/api/dashboards/${encodeURI(path)}`);
+interface DashboardPageProps {
+  tree: DashboardSummary[];
+  path: string;
+  revision: number;
+}
+
+function DashboardPage({ tree, path, revision }: DashboardPageProps) {
+  const dashboard = useJson<DashboardView>(`/api/dashboards/${encodeURI(path)}`, revision);
   if (dashboard === undefined) return null;
   if (dashboard === "missing") {
     return (
@@ -149,7 +167,7 @@ function Command({ text }: { text: string }) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ connection }: { connection: Connection }) {
   const url = `${location.origin}/mcp`;
   const desktop = { mcpServers: { agentdash: { command: "npx", args: ["mcp-remote", url] } } };
   return (
@@ -178,10 +196,14 @@ function EmptyState() {
           <Command text={JSON.stringify(desktop, null, 2)} />
         </section>
       </div>
-      <p className="listen" role="status">
-        <span className="dot" aria-hidden="true" />
-        Listening on {location.host}.
-      </p>
+      {connection === "live" ? (
+        <p className="listen" role="status">
+          <span className="dot" aria-hidden="true" />
+          Listening on {location.host}. This page fills in by itself.
+        </p>
+      ) : (
+        <ConnectionCard connection={connection} />
+      )}
     </div>
   );
 }
@@ -189,18 +211,21 @@ function EmptyState() {
 /** Renders the web UI: the empty state without Dashboards, otherwise the Dashboard at the URL. */
 export function App() {
   const path = useSyncExternalStore(subscribeToHistory, currentPath);
-  const tree = useJson<DashboardSummary[]>("/api/tree");
+  const { connection, revision } = useLiveData();
+  const tree = useJson<DashboardSummary[]>("/api/tree", revision);
   const dashboards = tree === "missing" ? undefined : tree;
   const first = dashboards?.[0];
+  const isEmpty = dashboards?.length === 0;
   useEffect(() => {
+    if (isEmpty && path !== "") navigate("", { replace: true });
     if (path === "" && first) navigate(first.path, { replace: true });
-  }, [path, first]);
+  }, [path, first, isEmpty]);
   if (!dashboards) return null;
-  if (!first) return <EmptyState />;
+  if (!first) return <EmptyState connection={connection} />;
   return (
     <div className="app">
-      <Sidebar tree={dashboards} path={path} />
-      <main>{path && <DashboardPage tree={dashboards} path={path} />}</main>
+      <Sidebar tree={dashboards} path={path} connection={connection} />
+      <main>{path && <DashboardPage tree={dashboards} path={path} revision={revision} />}</main>
     </div>
   );
 }
