@@ -44,10 +44,14 @@ interface StorageOptions {
 export function createStorage(path: string, options: StorageOptions = {}) {
   const db = openDatabase(path);
   const now = options.now ?? (() => new Date().toISOString());
+  const listeners = new Set<() => void>();
   const write =
     <I, O>(change: (db: Database, input: I, now: string) => O) =>
-    (input: I): O =>
-      db.transaction(() => change(db, input, now()));
+    (input: I): O => {
+      const result = db.transaction(() => change(db, input, now()));
+      for (const listener of listeners) listener();
+      return result;
+    };
   return {
     tree: () => treeSummaries(db),
     dashboard: (ref: string) => dashboardWithWidgets(db, ref),
@@ -93,6 +97,11 @@ export function createStorage(path: string, options: StorageOptions = {}) {
      * items under them.
      */
     archived: () => ({ ...archivedTreeItems(db), stores: archivedStores(db) }),
+    /** Adds a listener that runs after each write that succeeds. Returns its removal. */
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
     close: () => db.close(),
   };
 }
