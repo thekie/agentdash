@@ -485,6 +485,16 @@ export function widgetById(db: Database, id: string): Widget {
   return toWidget(tree, findWidget(tree, id));
 }
 
+/**
+ * Returns the Widget that holds the Widget with the id, with its live children, or `undefined` if a
+ * Dashboard holds it. Throws `StorageError` `not_found` if there is no Widget with the id.
+ */
+export function parentWidgetOf(db: Database, id: string): Widget | undefined {
+  const tree = treeOf(db);
+  const row = findWidget(tree, id);
+  return row.parentId === null ? undefined : toWidget(tree, findWidget(tree, row.parentId));
+}
+
 interface UpdateWidgetInput {
   id: string;
   expectedVersion: number;

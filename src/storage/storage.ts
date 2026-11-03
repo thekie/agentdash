@@ -21,6 +21,7 @@ import {
   dashboardWithWidgets,
   moveDashboard,
   moveWidget,
+  parentWidgetOf,
   restoreDashboard,
   restoreWidget,
   storeReaders,
@@ -51,6 +52,7 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     tree: () => treeSummaries(db),
     dashboard: (ref: string) => dashboardWithWidgets(db, ref),
     widget: (id: string) => widgetById(db, id),
+    parentWidget: (id: string) => parentWidgetOf(db, id),
     createDashboard: write(createDashboard),
     updateDashboard: write(updateDashboard),
     moveDashboard: write(moveDashboard),
@@ -94,6 +96,11 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     close: () => db.close(),
   };
 }
+
+export { ColumnKey, ColumnSpec, type ColumnType } from "./columns.ts";
+export { type Issue, type Path, StorageError } from "./errors.ts";
+export { Projection } from "./projection.ts";
+export { AlterOp } from "./stores.ts";
 
 /** Describes the object that `createStorage` returns. */
 export type Storage = ReturnType<typeof createStorage>;

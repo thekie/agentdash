@@ -1,11 +1,12 @@
-import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { McpServer } from "@modelcontextprotocol/server";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { test as base, expect } from "vitest";
 import { z } from "zod";
-import { serverInfo } from "./app.ts";
+import { createApp } from "./app.ts";
 import { instructions } from "./instructions.ts";
-import { createStorage, type Storage } from "./storage/storage.ts";
-import { registerTools } from "./tools.ts";
+import { createStorage } from "./storage/storage.ts";
 
 interface Agent {
   client: Client;
@@ -19,13 +20,15 @@ interface Agent {
 
 const ToolText = z.array(z.object({ text: z.string() }));
 
-async function connectAgent(storage: Storage): Promise<Agent> {
-  const server = new McpServer(serverInfo, { instructions });
-  registerTools(server, storage);
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverSide);
+type App = ReturnType<typeof createApp>["app"];
+
+async function connectAgent(app: App): Promise<Agent> {
   const client = new Client({ name: "test", version: "0" });
-  await client.connect(clientSide);
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL("http://agentdash.test/mcp"), {
+      fetch: async (url, init) => app.fetch(new Request(url, init)),
+    }),
+  );
   return {
     client,
     call: async (name, args = {}) => {
@@ -36,23 +39,26 @@ async function connectAgent(storage: Storage): Promise<Agent> {
   };
 }
 
-const test = base.extend<{ storage: Storage; agent: Agent; other: Agent }>({
+const agentFixture = async ({ app }: { app: App }, use: (agent: Agent) => Promise<void>) => {
+  const agent = await connectAgent(app);
+  await use(agent);
+  await agent.client.close();
+};
+
+/** Two Agents, `agent` and `other`, connected over `/mcp` to one app with an in-memory database. */
+const test = base.extend<{ app: App; agent: Agent; other: Agent }>({
   // biome-ignore lint/correctness/noEmptyPattern: A Vitest fixture must destructure its first argument.
-  storage: async ({}, use) => {
+  app: async ({}, use) => {
+    const webRoot = mkdtempSync(join(tmpdir(), "agentdash-web-"));
     const storage = createStorage(":memory:");
-    await use(storage);
+    const { app, close } = createApp(webRoot, storage);
+    await use(app);
+    await close();
     storage.close();
+    rmSync(webRoot, { recursive: true });
   },
-  agent: async ({ storage }, use) => {
-    const agent = await connectAgent(storage);
-    await use(agent);
-    await agent.client.close();
-  },
-  other: async ({ storage }, use) => {
-    const agent = await connectAgent(storage);
-    await use(agent);
-    await agent.client.close();
-  },
+  agent: agentFixture,
+  other: agentFixture,
 });
 
 async function seedFinance(agent: Agent): Promise<{ id: string }> {
@@ -76,6 +82,8 @@ async function seedFinance(agent: Agent): Promise<{ id: string }> {
   return area.body;
 }
 
+const note = { type: "note", config: { markdown: "x" } };
+
 const chart = (y: string) => ({
   type: "chart",
   title: "Spending",
@@ -83,30 +91,74 @@ const chart = (y: string) => ({
   projection: { from: "expenses", slots: { x: "date", y } },
 });
 
-test("the server sends the primer and 16 tools with object input schemas", async ({ agent }) => {
+test("the server sends the primer when an Agent connects", ({ agent }) => {
   expect(agent.client.getInstructions()).toBe(instructions);
-  const { tools } = await agent.client.listTools();
-  expect(tools).toHaveLength(16);
-  expect(tools.every((t) => t.inputSchema.type === "object")).toBe(true);
-  const widgetAdd = tools.find((t) => t.name === "widget_add");
-  expect(JSON.stringify(widgetAdd?.inputSchema)).toContain('"dashboardLink"');
 });
 
-test("an Agent builds a chart from appended rows and reads it back", async ({ agent }) => {
+test("the server lists 16 tools whose input schemas are objects", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  expect(tools.map((t) => t.inputSchema.type)).toEqual(Array(16).fill("object"));
+});
+
+test("the widget_add schema names every Widget type", async ({ agent }) => {
+  const { tools } = await agent.client.listTools();
+  const schema = JSON.stringify(tools.find((t) => t.name === "widget_add")?.inputSchema);
+  for (const type of [
+    "kpi",
+    "chart",
+    "table",
+    "progress",
+    "checklist",
+    "note",
+    "dashboardLink",
+    "columns",
+    "section",
+  ]) {
+    expect(schema).toContain(`"${type}"`);
+  }
+});
+
+test("an added chart shows on its Dashboard", async ({ agent }) => {
   const area = await seedFinance(agent);
-  const added = await agent.call("widget_add", {
-    parent: { dashboard: "finance" },
-    widget: chart("amount"),
-  });
-  expect(added.isError).toBe(false);
+  await agent.call("widget_add", { parent: { dashboard: "finance" }, widget: chart("amount") });
   const dashboard = await agent.call("get_dashboard", { dashboard: area.id });
   expect(dashboard.body.widgets).toMatchObject([
     { type: "chart", projection: { from: "expenses" } },
   ]);
+});
+
+test("query returns the appended rows", async ({ agent }) => {
+  await seedFinance(agent);
   const result = await agent.call("query", {
     projection: { from: "expenses", sort: [{ column: "date" }] },
   });
   expect(result.body.rows.map((r: { amount: number }) => r.amount)).toEqual([42.1, 900]);
+});
+
+test("a KPI reads a money column", async ({ agent }) => {
+  await seedFinance(agent);
+  const result = await agent.call("widget_add", {
+    parent: { dashboard: "finance" },
+    widget: { type: "kpi", config: {}, projection: { from: "expenses", slots: { y: "amount" } } },
+  });
+  expect(result).toMatchObject({ isError: false, body: { type: "kpi" } });
+});
+
+test("a bad position lists the valid anchors", async ({ agent }) => {
+  await seedFinance(agent);
+  const result = await agent.call("widget_add", {
+    parent: { dashboard: "finance" },
+    widget: note,
+    position: "middle",
+  });
+  expect(result.body.issues).toMatchObject([
+    { path: ["position"], validValues: ["first", "last"] },
+  ]);
+});
+
+test("a value of the wrong type names the expected type", async ({ agent }) => {
+  const result = await agent.call("dashboard_update", { dashboard: "x", expectedVersion: "one" });
+  expect(result.body.issues).toMatchObject([{ path: ["expectedVersion"], expected: "number" }]);
 });
 
 test.for([
@@ -299,7 +351,7 @@ test("a write into an Archived subtree fails with archived", async ({ agent, oth
   expect(result.body.code).toBe("archived");
 });
 
-test("widget_update replaces the config and keeps the type", async ({ agent }) => {
+test("widget_update replaces the config", async ({ agent }) => {
   await seedFinance(agent);
   const added = await agent.call("widget_add", {
     parent: { dashboard: "finance" },
@@ -311,10 +363,18 @@ test("widget_update replaces the config and keeps the type", async ({ agent }) =
     widget: { ...chart("amount"), config: { mark: "line" } },
   });
   expect(changed.body).toMatchObject({ config: { mark: "line" }, version: 2 });
+});
+
+test("widget_update cannot change the type", async ({ agent }) => {
+  await seedFinance(agent);
+  const added = await agent.call("widget_add", {
+    parent: { dashboard: "finance" },
+    widget: chart("amount"),
+  });
   const retyped = await agent.call("widget_update", {
     id: added.body.id,
-    expectedVersion: 2,
-    widget: { type: "note", config: { markdown: "x" } },
+    expectedVersion: 1,
+    widget: note,
   });
   expect(retyped.body).toMatchObject({
     code: "invalid",
@@ -351,11 +411,16 @@ test.for([
   expect(result.body).toMatchObject({ code: "invalid", issues: [{ path: ["parent"] }] });
 });
 
-test("an Archived row is listed and restored", async ({ agent }) => {
+test("list_archived lists the Archived rows of a Data Store", async ({ agent }) => {
   await seedFinance(agent);
   await agent.call("archive", { kind: "row", store: "expenses", id: 1, expectedVersion: 1 });
   const archived = await agent.call("list_archived", { store: "expenses" });
   expect(archived.body.rows).toMatchObject([{ id: 1 }]);
+});
+
+test("an Archived row is restored", async ({ agent }) => {
+  await seedFinance(agent);
+  await agent.call("archive", { kind: "row", store: "expenses", id: 1, expectedVersion: 1 });
   const restored = await agent.call("restore", {
     kind: "row",
     store: "expenses",
@@ -373,36 +438,75 @@ test.for([
   expect(result.body).toMatchObject({ code: "invalid", issues: [{ path }] });
 });
 
-test("a Data Store is Archived and restored by id", async ({ agent }) => {
+test("list_archived lists an Archived Data Store", async ({ agent }) => {
   await seedFinance(agent);
   const [store] = (await agent.call("list_stores")).body;
   await agent.call("archive", { kind: "store", id: store.id, expectedVersion: 1 });
   expect((await agent.call("list_archived")).body.stores).toMatchObject([{ name: "expenses" }]);
-  await agent.call("restore", { kind: "store", id: store.id, expectedVersion: 2 });
-  expect((await agent.call("list_stores")).body).toHaveLength(1);
 });
 
-test("an Archived column comes back with restore_column", async ({ agent }) => {
+test("a restored Data Store is live again", async ({ agent }) => {
+  await seedFinance(agent);
+  const [store] = (await agent.call("list_stores")).body;
+  await agent.call("archive", { kind: "store", id: store.id, expectedVersion: 1 });
+  await agent.call("restore", { kind: "store", id: store.id, expectedVersion: 2 });
+  expect((await agent.call("list_stores")).body).toMatchObject([{ name: "expenses" }]);
+});
+
+test("list_archived lists the Archived columns of a Data Store", async ({ agent }) => {
   await seedFinance(agent);
   await agent.call("store_alter", {
     store: "expenses",
     expectedVersion: 1,
-    ops: [{ op: "add_column", column: { key: "note", type: "text" } }],
+    ops: [
+      { op: "add_column", column: { key: "note", type: "text" } },
+      { op: "archive_column", column: "note" },
+    ],
   });
-  await agent.call("store_alter", {
-    store: "expenses",
-    expectedVersion: 2,
-    ops: [{ op: "archive_column", column: "note" }],
+  const archived = await agent.call("list_archived", { store: "expenses" });
+  expect(archived.body.columns).toMatchObject([{ key: "note" }]);
+});
+
+/** Adds a `columns` Widget with `count` notes to Finance and returns the ids of the notes. */
+async function addColumns(agent: Agent, count: number): Promise<{ id: string; notes: string[] }> {
+  await seedFinance(agent);
+  const added = await agent.call("widget_add", {
+    parent: { dashboard: "finance" },
+    widget: { type: "columns", config: {}, children: Array(count).fill(note) },
   });
-  expect((await agent.call("list_archived", { store: "expenses" })).body.columns).toMatchObject([
-    { key: "note" },
-  ]);
-  const restored = await agent.call("store_alter", {
-    store: "expenses",
-    expectedVersion: 3,
-    ops: [{ op: "restore_column", column: "note" }],
+  return { id: added.body.id, notes: added.body.children.map((c: { id: string }) => c.id) };
+}
+
+test("a Widget cannot leave a columns Widget with 2 children", async ({ agent }) => {
+  const { notes } = await addColumns(agent, 2);
+  const result = await agent.call("move", {
+    kind: "widget",
+    id: notes[0],
+    expectedVersion: 1,
+    parent: { dashboard: "finance" },
   });
-  expect(restored.body.store.columns.map((c: { key: string }) => c.key)).toContain("note");
+  expect(result.body).toMatchObject({ code: "invalid", issues: [{ path: ["id"] }] });
+});
+
+test("a child of a columns Widget with 2 children cannot be Archived", async ({ agent }) => {
+  const { notes } = await addColumns(agent, 2);
+  const result = await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
+  expect(result.body).toMatchObject({ code: "invalid", issues: [{ path: ["id"] }] });
+});
+
+test("archiving an Archived child of a columns Widget again changes nothing", async ({ agent }) => {
+  const { notes } = await addColumns(agent, 3);
+  await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
+  const again = await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 2 });
+  expect(again).toMatchObject({ isError: false, body: { version: 2 } });
+});
+
+test("a Widget cannot be restored into a columns Widget with 4 children", async ({ agent }) => {
+  const { id, notes } = await addColumns(agent, 4);
+  await agent.call("archive", { kind: "widget", id: notes[0], expectedVersion: 1 });
+  await agent.call("widget_add", { parent: { widget: id }, widget: note });
+  const result = await agent.call("restore", { kind: "widget", id: notes[0], expectedVersion: 2 });
+  expect(result.body).toMatchObject({ code: "invalid", issues: [{ path: ["id"] }] });
 });
 
 test("rows_update writes values at the expected version", async ({ agent }) => {

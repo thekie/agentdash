@@ -4,63 +4,120 @@ import type {
   StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
 import { ZodError, z } from "zod";
-import { layoutTypes, maxColumns, slotIssues, Widget, WidgetFields } from "./catalog.ts";
-import { ColumnKey, ColumnSpec } from "./storage/columns.ts";
-import { type Issue, type Path, StorageError } from "./storage/errors.ts";
-import { Projection } from "./storage/projection.ts";
-import type { Storage } from "./storage/storage.ts";
-import { AlterOp } from "./storage/stores.ts";
+import {
+  addChildIssues,
+  removeChildIssues,
+  slotIssues,
+  typeChangeIssues,
+  Widget,
+  WidgetFields,
+} from "./catalog.ts";
+import {
+  AlterOp,
+  ColumnKey,
+  ColumnSpec,
+  type Issue,
+  type Path,
+  Projection,
+  type Storage,
+  StorageError,
+} from "./storage/storage.ts";
 
 const Version = z.int().min(1);
-const Position = z.union([
-  z.enum(["first", "last"]),
-  z.strictObject({ before: z.string() }),
-  z.strictObject({ after: z.string() }),
-]);
+const Position = z.union(
+  [
+    z.enum(["first", "last"]),
+    z.strictObject({ before: z.string() }),
+    z.strictObject({ after: z.string() }),
+  ],
+  { error: 'expected "first", "last", { before: id } or { after: id }' },
+);
 const WidgetParent = z.union([
   z.strictObject({ dashboard: z.string().describe("A Dashboard id or path") }),
   z.strictObject({ widget: z.string().describe("The id of a columns or section Widget") }),
 ]);
-const Kind = z.enum(["dashboard", "widget", "store", "row"]);
-const ItemRef = z.strictObject({
-  kind: Kind,
+type WidgetParent = z.output<typeof WidgetParent>;
+
+const ItemRef = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.enum(["dashboard", "widget", "store"]),
+    id: z.string(),
+    expectedVersion: Version,
+  }),
+  z.strictObject({
+    kind: z.literal("row"),
+    store: z.string(),
+    id: z.int(),
+    expectedVersion: Version,
+  }),
+]);
+type ItemRef = z.output<typeof ItemRef>;
+
+// MCP clients reject a tool whose input schema has a union at the top, so `archive`, `restore` and
+// `move` list these flat schemas and parse with the unions above.
+const ItemRefListing = z.strictObject({
+  kind: z.enum(["dashboard", "widget", "store", "row"]),
   id: z.union([z.string(), z.int()]).describe("A row id is a number. Every other id is a string."),
   store: z.string().optional().describe("The Data Store of a row"),
   expectedVersion: Version,
 });
 
-/**
- * Returns `schema` with a validation that accepts any input. The tool parses its input itself, so
- * that an invalid call gets the error envelope with its issues.
- */
-function unchecked(schema: z.ZodType): StandardSchemaWithJSON {
+const MoveFields = { id: z.string(), expectedVersion: Version, position: Position.optional() };
+const Move = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("dashboard"), parent: z.string().nullable(), ...MoveFields }),
+  z.strictObject({ kind: z.literal("widget"), parent: WidgetParent, ...MoveFields }),
+]);
+type Move = z.output<typeof Move>;
+
+const MoveListing = z.strictObject({
+  kind: z.enum(["dashboard", "widget"]),
+  parent: z
+    .union([z.string(), z.null(), WidgetParent])
+    .describe(
+      "For a Dashboard: the id or path of the new parent, or null to make it an Area. For a Widget: { dashboard } or { widget }.",
+    ),
+  ...MoveFields,
+});
+
+/** Returns `schema` for the tool listing, with a validation that accepts any input. */
+function unvalidated(schema: z.ZodType): StandardSchemaWithJSON {
   return { "~standard": { ...schema["~standard"], validate: (value: unknown) => ({ value }) } };
 }
 
-function issuesOf(error: ZodError): Issue[] {
-  return error.issues.map((issue) => ({
-    path: issue.path.map((p) => (typeof p === "number" ? p : String(p))),
-    problem: issue.message,
-    ...("values" in issue && { validValues: issue.values.map(String) }),
-    ...("options" in issue && { validValues: issue.options.map(String) }),
-  }));
+function validValuesOf(issue: z.core.$ZodIssue): string[] | undefined {
+  if (issue.code === "invalid_value") return issue.values.map(String);
+  if (issue.code === "invalid_union") {
+    const values = issue.errors.flat().flatMap((i) => validValuesOf(i) ?? []);
+    return "options" in issue ? issue.options.map(String) : values.length > 0 ? values : undefined;
+  }
+  return undefined;
 }
 
-function json(value: unknown, isError = false): CallToolResult {
+function issuesOf(error: ZodError): Issue[] {
+  return error.issues.map((issue) => {
+    const validValues = validValuesOf(issue);
+    return {
+      path: issue.path.map((p) => (typeof p === "number" ? p : String(p))),
+      problem: issue.message,
+      ...(issue.code === "invalid_type" && { expected: issue.expected }),
+      ...(validValues && { validValues }),
+    };
+  });
+}
+
+function toolResult(value: unknown, isError = false): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value) }], ...(isError && { isError }) };
 }
 
 /** Returns the error envelope for a failure an Agent can correct. Throws any other error again. */
-function failure(error: unknown): CallToolResult {
+function errorResult(error: unknown): CallToolResult {
   if (error instanceof ZodError) {
-    return json(
-      { code: "invalid", message: "The input is invalid", issues: issuesOf(error) },
-      true,
-    );
+    const issues = issuesOf(error);
+    return toolResult({ code: "invalid", message: "The input is invalid", issues }, true);
   }
   if (!(error instanceof StorageError)) throw error;
   const { issues = [], ...rest } = error.details;
-  return json({ code: error.code, message: error.message, issues, ...rest }, true);
+  return toolResult({ code: error.code, message: error.message, issues, ...rest }, true);
 }
 
 function assertNoIssues(issues: Issue[]): void {
@@ -75,10 +132,10 @@ function widgetIssues(storage: Storage, widget: Widget | WidgetFields, path: Pat
           widgetIssues(storage, child, [...path, "children", i]),
         )
       : [];
-  return [...ownIssues(storage, widget, path), ...children];
+  return [...dataIssues(storage, widget, path), ...children];
 }
 
-function ownIssues(storage: Storage, widget: Widget | WidgetFields, path: Path): Issue[] {
+function dataIssues(storage: Storage, widget: Widget | WidgetFields, path: Path): Issue[] {
   if (widget.type === "dashboardLink") {
     const isLive = storage.tree().some((d) => d.id === widget.config.dashboardId);
     return isLive
@@ -90,95 +147,70 @@ function ownIssues(storage: Storage, widget: Widget | WidgetFields, path: Path):
   return "issues" in result ? result.issues : slotIssues(widget, result.columns, path);
 }
 
-/** Returns the problems of putting a Widget into `parent`. `moving` is the id of a moved Widget. */
-function parentIssues(
-  storage: Storage,
-  parent: z.output<typeof WidgetParent>,
-  moving?: string,
-): Issue[] {
-  if (!("widget" in parent)) return [];
-  const target = storage.widget(parent.widget);
-  const path = ["parent", "widget"];
-  if (!layoutTypes.has(target.type)) {
-    return [
-      {
-        path,
-        problem: `a ${target.type} Widget holds no children`,
-        expected: "a columns or section Widget",
-      },
-    ];
-  }
-  const others = target.children.filter((c) => c.id !== moving);
-  return target.type === "columns" && others.length >= maxColumns
-    ? [{ path, problem: `a columns Widget holds at most ${maxColumns} children` }]
+function addIssues(storage: Storage, parent: WidgetParent): Issue[] {
+  return "widget" in parent
+    ? addChildIssues(storage.widget(parent.widget), ["parent", "widget"])
     : [];
 }
 
-function stringId(ref: z.output<typeof ItemRef>): string {
-  if (typeof ref.id === "string") return ref.id;
-  throw new StorageError("invalid", `A ${ref.kind} id is a string`, {
-    issues: [{ path: ["id"], problem: "expected a string" }],
-  });
+/** Returns the problems of taking the live Widget with the id out of the Widget that holds it. */
+function removeIssues(storage: Storage, id: string): Issue[] {
+  const holder = storage.parentWidget(id);
+  return holder?.children.some((c) => c.id === id) ? removeChildIssues(holder, ["id"]) : [];
 }
 
-function rowRef(ref: z.output<typeof ItemRef>) {
-  if (typeof ref.id === "number" && ref.store !== undefined) {
-    return { store: ref.store, id: ref.id, expectedVersion: ref.expectedVersion };
-  }
-  throw new StorageError("invalid", "A row needs its Data Store and a number id", {
-    issues: [
-      { path: ref.store === undefined ? ["store"] : ["id"], problem: "missing or wrong type" },
-    ],
-  });
+/** Returns the problems of putting the Archived Widget with the id back into its holder. */
+function restoreIssues(storage: Storage, id: string): Issue[] {
+  const holder = storage.parentWidget(id);
+  return holder && !holder.children.some((c) => c.id === id) ? addChildIssues(holder, ["id"]) : [];
 }
 
-/** Archives or restores the item that `ref` names. */
-function setArchived(
-  storage: Storage,
-  ref: z.output<typeof ItemRef>,
-  isArchived: boolean,
-): unknown {
-  if (ref.kind === "row")
-    return isArchived ? storage.archiveRow(rowRef(ref)) : storage.restoreRow(rowRef(ref));
-  const input = { id: stringId(ref), expectedVersion: ref.expectedVersion };
-  const writes = {
-    dashboard: [storage.archiveDashboard, storage.restoreDashboard],
-    widget: [storage.archiveWidget, storage.restoreWidget],
-    store: [storage.archiveStore, storage.restoreStore],
-  } as const;
-  const [archive, restore] = writes[ref.kind];
-  return (isArchived ? archive : restore)(input);
+/**
+ * Moves a Dashboard or a Widget. Throws `StorageError` `invalid` if a `columns` Widget would end up
+ * with fewer than 2 or more than 4 children.
+ */
+function moveItem(storage: Storage, input: Move): unknown {
+  if (input.kind === "dashboard") return storage.moveDashboard(input);
+  // Storage calls are synchronous, so no other tool call can change the holders between these
+  // checks and the write.
+  const from = storage.parentWidget(input.id)?.id;
+  const to = "widget" in input.parent ? input.parent.widget : undefined;
+  if (from !== to) {
+    const holder = to === undefined ? undefined : storage.widget(to);
+    assertNoIssues([
+      ...removeIssues(storage, input.id),
+      ...(holder ? addChildIssues(holder, ["parent", "widget"]) : []),
+    ]);
+  }
+  return storage.moveWidget(input);
 }
 
-const Move = z.strictObject({
-  kind: z.enum(["dashboard", "widget"]),
-  id: z.string(),
-  expectedVersion: Version,
-  parent: z
-    .union([z.string(), z.null(), WidgetParent])
-    .describe(
-      "For a Dashboard: the id or path of the new parent, or null to make it an Area. For a Widget: { dashboard } or { widget }.",
-    ),
-  position: Position.optional(),
-});
+function archiveItem(storage: Storage, ref: ItemRef): unknown {
+  switch (ref.kind) {
+    case "row":
+      return storage.archiveRow(ref);
+    case "dashboard":
+      return storage.archiveDashboard(ref);
+    case "widget":
+      assertNoIssues(removeIssues(storage, ref.id));
+      return storage.archiveWidget(ref);
+    case "store":
+      return storage.archiveStore(ref);
+  }
+}
 
-function move(storage: Storage, input: z.output<typeof Move>): unknown {
-  const { kind, parent, ...rest } = input;
-  if (kind === "dashboard") {
-    if (typeof parent === "object" && parent !== null) {
-      throw new StorageError("invalid", "A Dashboard moves under a Dashboard id or path, or null", {
-        issues: [{ path: ["parent"], problem: "expected a string or null" }],
-      });
-    }
-    return storage.moveDashboard({ ...rest, parent });
+function restoreItem(storage: Storage, ref: ItemRef): unknown {
+  switch (ref.kind) {
+    case "row":
+      return storage.restoreRow(ref);
+    case "dashboard":
+      return storage.restoreDashboard(ref);
+    case "widget":
+      assertNoIssues(restoreIssues(storage, ref.id));
+      return storage.restoreWidget(ref);
+    case "store":
+      return storage.restoreStore(ref);
   }
-  if (typeof parent !== "object" || parent === null) {
-    throw new StorageError("invalid", "A Widget moves to { dashboard } or { widget }", {
-      issues: [{ path: ["parent"], problem: "expected { dashboard } or { widget }" }],
-    });
-  }
-  assertNoIssues(parentIssues(storage, parent, input.id));
-  return storage.moveWidget({ ...rest, parent });
 }
 
 const widgetExamples = `Examples, one per type:
@@ -192,34 +224,39 @@ const widgetExamples = `Examples, one per type:
 {"type":"columns","config":{},"children":[{"type":"note","config":{"markdown":"left"}},{"type":"note","config":{"markdown":"right"}}]}
 {"type":"section","title":"Running","config":{},"children":[]}`;
 
-/** Registers the tools that Agents read and write the Owner's dashboards with. */
+/** Registers the tools that Agents read and write Dashboards, Widgets and Data Stores with. */
 export function registerTools(server: McpServer, storage: Storage): void {
   const tool = <S extends z.ZodType>(
     name: string,
     description: string,
     input: S,
     run: (args: z.output<S>) => unknown,
-    isReadOnly = false,
+    options: { isReadOnly?: boolean; listing?: z.ZodType } = {},
   ) =>
     server.registerTool(
       name,
-      { description, inputSchema: unchecked(input), annotations: { readOnlyHint: isReadOnly } },
+      {
+        description,
+        inputSchema: unvalidated(options.listing ?? input),
+        annotations: { readOnlyHint: options.isReadOnly ?? false },
+      },
       (args: unknown) => {
         try {
-          return json(run(input.parse(args)));
+          return toolResult(run(input.parse(args)));
         } catch (error) {
-          return failure(error);
+          return errorResult(error);
         }
       },
     );
-  const none = z.strictObject({});
+  const noInput = z.strictObject({});
+  const readOnly = { isReadOnly: true };
 
   tool(
     "get_tree",
     "Lists every live Dashboard with its path and its Widget, child and broken-Widget counts.",
-    none,
+    noInput,
     () => storage.tree(),
-    true,
+    readOnly,
   );
   tool(
     "get_dashboard",
@@ -228,14 +265,14 @@ export function registerTools(server: McpServer, storage: Storage): void {
       dashboard: z.string().describe("A Dashboard id or path such as finance/budget"),
     }),
     ({ dashboard }) => storage.dashboard(dashboard),
-    true,
+    readOnly,
   );
   tool(
     "list_stores",
     "Lists every live Data Store with its columns, Key, row count and the Widgets that read it.",
-    none,
+    noInput,
     () => storage.stores(),
-    true,
+    readOnly,
   );
   tool(
     "list_archived",
@@ -245,14 +282,14 @@ export function registerTools(server: McpServer, storage: Storage): void {
       store === undefined
         ? storage.archived()
         : { rows: storage.archivedRows(store), columns: storage.store(store).archivedColumns },
-    true,
+    readOnly,
   );
   tool(
     "query",
     "Runs a Projection and returns its columns and rows, at most `limit` (default 100, max 1,000). `truncated` is true if there are more.",
     z.strictObject({ projection: Projection }),
     ({ projection }) => storage.query(projection),
-    true,
+    readOnly,
   );
 
   tool(
@@ -288,7 +325,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     z.strictObject({ parent: WidgetParent, widget: Widget, position: Position.optional() }),
     (input) => {
       assertNoIssues([
-        ...parentIssues(storage, input.parent),
+        ...addIssues(storage, input.parent),
         ...widgetIssues(storage, input.widget, ["widget"]),
       ]);
       return storage.addWidget(input);
@@ -299,23 +336,10 @@ export function registerTools(server: McpServer, storage: Storage): void {
     "Replaces the title, config and Projection of a Widget. Its type and children stay.",
     z.strictObject({ id: z.string(), expectedVersion: Version, widget: WidgetFields }),
     ({ id, expectedVersion, widget }) => {
-      const stored = storage.widget(id);
-      if (stored.type !== widget.type) {
-        throw new StorageError(
-          "invalid",
-          `Widget ${id} is a ${stored.type}. Its type cannot change.`,
-          {
-            issues: [
-              {
-                path: ["widget", "type"],
-                problem: "type cannot change",
-                validValues: [stored.type],
-              },
-            ],
-          },
-        );
-      }
-      assertNoIssues(widgetIssues(storage, widget, ["widget"]));
+      assertNoIssues([
+        ...typeChangeIssues(storage.widget(id).type, widget.type),
+        ...widgetIssues(storage, widget, ["widget"]),
+      ]);
       const { title, config } = widget;
       return storage.updateWidget({
         id,
@@ -382,15 +406,21 @@ export function registerTools(server: McpServer, storage: Storage): void {
     "move",
     "Moves a Dashboard under another one, or a Widget with its subtree to a Dashboard or layout Widget.",
     Move,
-    (input) => move(storage, input),
+    (input) => moveItem(storage, input),
+    { listing: MoveListing },
   );
   tool(
     "archive",
     "Archives a Dashboard, Widget, Data Store or row, which hides everything under it.",
     ItemRef,
-    (ref) => setArchived(storage, ref, true),
+    (ref) => archiveItem(storage, ref),
+    { listing: ItemRefListing },
   );
-  tool("restore", "Restores an Archived Dashboard, Widget, Data Store or row.", ItemRef, (ref) =>
-    setArchived(storage, ref, false),
+  tool(
+    "restore",
+    "Restores an Archived Dashboard, Widget, Data Store or row.",
+    ItemRef,
+    (ref) => restoreItem(storage, ref),
+    { listing: ItemRefListing },
   );
 }

@@ -1,7 +1,10 @@
 import { z } from "zod";
-import type { ColumnType } from "./storage/columns.ts";
-import type { Issue, Path } from "./storage/errors.ts";
-import { Projection as AnyProjection } from "./storage/projection.ts";
+import {
+  Projection as AnyProjection,
+  type ColumnType,
+  type Issue,
+  type Path,
+} from "./storage/storage.ts";
 
 // The id puts the Projection schema into `$defs` once, so the tool schemas do not repeat it per type.
 const Projection = AnyProjection.meta({ id: "Projection" });
@@ -93,34 +96,29 @@ const SectionFields = z.strictObject({
   config: NoConfig,
 });
 
-/** The Widget types that hold child Widgets. */
-export const layoutTypes = new Set(["columns", "section"]);
+const layoutTypes = ["columns", "section"] as const;
+type LayoutType = (typeof layoutTypes)[number];
 
-/** The most children that a `columns` Widget holds. */
-export const maxColumns = 4;
+const maxColumns = 4;
+const minColumns = 2;
+
+const leafTypes = [Kpi, Chart, Table, Progress, Checklist, Note, DashboardLink] as const;
 
 /**
  * The schema of a Widget without its children, as `widget_update` replaces it. The type picks the
  * schema of `config` and whether a Projection is required.
  */
 export const WidgetFields = z.discriminatedUnion("type", [
-  Kpi,
-  Chart,
-  Table,
-  Progress,
-  Checklist,
-  Note,
-  DashboardLink,
+  ...leafTypes,
   ColumnsFields,
   SectionFields,
 ]);
 export type WidgetFields = z.output<typeof WidgetFields>;
 
-/** Describes a Widget with its subtree, after `Widget` has parsed it. */
-export type Widget = Exclude<WidgetFields, { type: "columns" | "section" }> | LayoutWidget;
+export type Widget = Exclude<WidgetFields, { type: LayoutType }> | LayoutWidget;
 
 interface LayoutWidget {
-  type: "columns" | "section";
+  type: LayoutType;
   title?: string | undefined;
   config: Record<string, never>;
   children: Widget[];
@@ -132,17 +130,47 @@ interface LayoutWidget {
  */
 export const Widget: z.ZodType<Widget, unknown> = z.lazy(() =>
   z.discriminatedUnion("type", [
-    Kpi,
-    Chart,
-    Table,
-    Progress,
-    Checklist,
-    Note,
-    DashboardLink,
-    ColumnsFields.extend({ children: z.array(Widget).min(2).max(maxColumns) }),
+    ...leafTypes,
+    ColumnsFields.extend({ children: z.array(Widget).min(minColumns).max(maxColumns) }),
     SectionFields.extend({ children: z.array(Widget).default([]) }),
   ]),
 );
+
+/** Describes a stored Widget that holds or can hold other Widgets. */
+interface Holder {
+  type: string;
+  children: unknown[];
+}
+
+/** Returns the problems of putting one more child Widget into `holder`. */
+export function addChildIssues(holder: Holder, path: Path): Issue[] {
+  if (!layoutTypes.some((t) => t === holder.type)) {
+    return [
+      {
+        path,
+        problem: `a ${holder.type} Widget holds no children`,
+        expected: "a columns or section Widget",
+      },
+    ];
+  }
+  return holder.type === "columns" && holder.children.length >= maxColumns
+    ? [{ path, problem: `a columns Widget holds at most ${maxColumns} children` }]
+    : [];
+}
+
+/** Returns the problems of taking one child Widget out of `holder`. */
+export function removeChildIssues(holder: Holder, path: Path): Issue[] {
+  return holder.type === "columns" && holder.children.length <= minColumns
+    ? [{ path, problem: `a columns Widget holds at least ${minColumns} children` }]
+    : [];
+}
+
+/** Returns the problem of writing a Widget of type `type` over a stored Widget of `storedType`. */
+export function typeChangeIssues(storedType: string, type: string): Issue[] {
+  return storedType === type
+    ? []
+    : [{ path: ["widget", "type"], problem: "the type cannot change", validValues: [storedType] }];
+}
 
 type TypeName = ColumnType["type"];
 
@@ -156,7 +184,7 @@ interface SlotRule {
 const numeric: TypeName[] = ["number", "money"];
 const time: TypeName[] = ["date", "datetime"];
 
-const slotRules: Record<string, Record<string, SlotRule>> = {
+const slotRules: Partial<Record<WidgetFields["type"], Record<string, SlotRule>>> = {
   kpi: { y: { types: numeric, isRequired: true }, x: { types: time } },
   chart: {
     x: { types: [...time, "text", "enum"], isRequired: true },
@@ -176,7 +204,10 @@ const slotRules: Record<string, Record<string, SlotRule>> = {
   },
 };
 
-type Output = { name: string; type: ColumnType };
+interface Output {
+  name: string;
+  type: ColumnType;
+}
 
 function slotValueIssues(
   slot: string,
@@ -217,7 +248,7 @@ function chartIssues(
   if (ys.length > 1 && slots.series !== undefined) {
     issues.push({
       path: [...path, "series"],
-      problem: "a chart uses several y columns or series, not both",
+      problem: "a chart with several y columns cannot also have series",
     });
   }
   const axes = new Set(
