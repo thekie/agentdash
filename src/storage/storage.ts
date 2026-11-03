@@ -1,6 +1,7 @@
 import { type Database, openDatabase } from "./database.ts";
+import type { Path } from "./errors.ts";
 import type { ProjectionInput } from "./projection.ts";
-import { queryProjection } from "./query.ts";
+import { projectionColumns, queryProjection } from "./query.ts";
 import { appendRows, archivedRows, archiveRow, liveRows, restoreRow, updateRows } from "./rows.ts";
 import {
   alterStore,
@@ -20,12 +21,14 @@ import {
   dashboardWithWidgets,
   moveDashboard,
   moveWidget,
+  parentWidgetOf,
   restoreDashboard,
   restoreWidget,
   storeReaders,
   treeSummaries,
   updateDashboard,
   updateWidget,
+  widgetById,
 } from "./tree.ts";
 
 interface StorageOptions {
@@ -48,6 +51,8 @@ export function createStorage(path: string, options: StorageOptions = {}) {
   return {
     tree: () => treeSummaries(db),
     dashboard: (ref: string) => dashboardWithWidgets(db, ref),
+    widget: (id: string) => widgetById(db, id),
+    parentWidget: (id: string) => parentWidgetOf(db, id),
     createDashboard: write(createDashboard),
     updateDashboard: write(updateDashboard),
     moveDashboard: write(moveDashboard),
@@ -81,6 +86,7 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     restoreRow: write(restoreRow),
 
     query: (projection: ProjectionInput) => queryProjection(db, projection, now()),
+    projectionColumns: (projection: unknown, path: Path) => projectionColumns(db, projection, path),
 
     /**
      * Returns the Dashboards, Widgets and Data Stores that are Archived themselves, without the
@@ -90,6 +96,11 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     close: () => db.close(),
   };
 }
+
+export { ColumnKey, ColumnSpec, type ColumnType } from "./columns.ts";
+export { type Issue, type Path, StorageError } from "./errors.ts";
+export { Projection } from "./projection.ts";
+export { AlterOp } from "./stores.ts";
 
 /** Describes the object that `createStorage` returns. */
 export type Storage = ReturnType<typeof createStorage>;

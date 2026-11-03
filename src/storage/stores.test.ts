@@ -134,6 +134,44 @@ test("an Archived column is no longer read", ({ storage }) => {
   expect(storage.store("weight").columns.map((c) => c.key)).toEqual(["day", "kg"]);
 });
 
+test("restoring an Archived column brings back its place and values", ({ storage }) => {
+  const store = createWeightLog(storage);
+  storage.appendRows({ store: "weight", rows: [{ day: "2026-01-01", note: "after run" }] });
+  storage.alterStore({
+    store: store.id,
+    expectedVersion: 1,
+    ops: [{ op: "archive_column", column: "note" }],
+  });
+  storage.alterStore({
+    store: store.id,
+    expectedVersion: 2,
+    ops: [{ op: "restore_column", column: "note" }],
+  });
+  expect(storage.store("weight").columns.map((c) => c.key)).toEqual(["day", "kg", "note"]);
+  expect(storage.rows("weight")[0]).toMatchObject({ values: { note: "after run" } });
+});
+
+test.for([
+  ["a live column has its key", "kg"],
+  ["no Archived column has the key", "mood"],
+] as const)("restoring a column fails with invalid if %s", ([, column], { storage }) => {
+  const store = createWeightLog(storage);
+  storage.alterStore({
+    store: store.id,
+    expectedVersion: 1,
+    ops: [{ op: "retype_column", column: "kg", to: { type: "text" } }],
+  });
+  const failure = failureOf(() =>
+    storage.alterStore({
+      store: store.id,
+      expectedVersion: 2,
+      ops: [{ op: "restore_column", column }],
+    }),
+  );
+  expect(failure.code).toBe("invalid");
+  expect(failure.details.issues?.[0]?.path).toEqual(["ops", 0, "column"]);
+});
+
 test("a Key column cannot be Archived", ({ storage }) => {
   const store = createWeightLog(storage);
   const failure = failureOf(() =>

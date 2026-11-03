@@ -4,15 +4,18 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { test as base, expect } from "vitest";
 import { createApp, serverInfo } from "./app.ts";
+import { createStorage } from "./storage/storage.ts";
 
 const test = base.extend<{ app: ReturnType<typeof createApp>["app"] }>({
   // biome-ignore lint/correctness/noEmptyPattern: A Vitest fixture must destructure its first argument.
   app: async ({}, use) => {
     const webRoot = mkdtempSync(join(tmpdir(), "agentdash-web-"));
     writeFileSync(join(webRoot, "index.html"), "<h1>agentdash</h1>");
-    const { app, close } = createApp(webRoot);
+    const storage = createStorage(":memory:");
+    const { app, close } = createApp(webRoot, storage);
     await use(app);
     await close();
+    storage.close();
     rmSync(webRoot, { recursive: true });
   },
 });

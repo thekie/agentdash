@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createApp, serverInfo } from "./app.ts";
 import { HOST, parseOptions } from "./options.ts";
+import { createStorage } from "./storage/storage.ts";
 
 const { port, dataDir } = parseOptions(process.argv.slice(2));
 mkdirSync(dataDir, { recursive: true });
 
-const { app, close } = createApp(fileURLToPath(new URL("../dist/web", import.meta.url)));
+const storage = createStorage(join(dataDir, "agentdash.db"));
+const { app, close } = createApp(fileURLToPath(new URL("../dist/web", import.meta.url)), storage);
 const server = serve({ fetch: app.fetch, hostname: HOST, port }, (info) => {
   const url = `http://${HOST}:${info.port}`;
   const desktop = { [serverInfo.name]: { command: "npx", args: ["mcp-remote", `${url}/mcp`] } };
@@ -24,6 +27,7 @@ Connect Claude Desktop: add under "mcpServers" in claude_desktop_config.json:
 async function shutdown() {
   await close();
   server.close();
+  storage.close();
   if ("closeAllConnections" in server) server.closeAllConnections();
 }
 process.once("SIGINT", () => void shutdown());

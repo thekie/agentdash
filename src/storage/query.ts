@@ -1,7 +1,7 @@
 import type { SQLInputValue } from "node:sqlite";
 import type { ColumnType } from "./columns.ts";
 import { type Database, quoteId } from "./database.ts";
-import { type Issue, StorageError } from "./errors.ts";
+import { type Issue, type Path, StorageError } from "./errors.ts";
 import {
   type Bucket,
   isRelative,
@@ -10,7 +10,7 @@ import {
   type Ref,
   type ResolvedFilter,
   type ResolvedProjection,
-  resolveAgentProjection,
+  resolveReadableProjection,
 } from "./projection.ts";
 import { tableOf } from "./stores.ts";
 import { formatValue, StoredValue } from "./values.ts";
@@ -154,12 +154,27 @@ export interface QueryResult {
 }
 
 /**
- * Returns the rows that a Projection in Agent form selects, at most its `limit`. Throws
+ * Returns the output columns of a Projection in readable form, or every problem it has, each with
+ * `path` in front.
+ */
+export function projectionColumns(
+  db: Database,
+  input: unknown,
+  path: Path,
+): { columns: QueryResult["columns"] } | { issues: Issue[] } {
+  const issues: Issue[] = [];
+  const projection = resolveReadableProjection(db, input, path, issues);
+  if (!projection) return { issues };
+  return { columns: projection.outputs.map(({ name, type }) => ({ name, type })) };
+}
+
+/**
+ * Returns the rows that a Projection in readable form selects, at most its `limit`. Throws
  * `StorageError` `invalid` if the Projection names an unknown Data Store, column or output column.
  */
 export function queryProjection(db: Database, input: ProjectionInput, now: string): QueryResult {
   const issues: Issue[] = [];
-  const projection = resolveAgentProjection(db, input, [], issues);
+  const projection = resolveReadableProjection(db, input, [], issues);
   if (!projection) throw new StorageError("invalid", "The Projection is invalid", { issues });
   const { sql, params } = compileProjection(projection, now);
   const rows = db.select(sql, ...params);

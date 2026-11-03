@@ -85,7 +85,7 @@ export interface Widget {
   type: string;
   title: string | null;
   config: unknown;
-  /** The Projection in Agent form, with the current names of its Data Stores and columns. */
+  /** The Projection in readable form, with the current names of its Data Stores and columns. */
   projection: unknown;
   /** The reason the Widget cannot read its Data Stores. It is missing if the Widget works. */
   broken?: Broken;
@@ -476,9 +476,23 @@ export function addWidget(db: Database, input: AddWidgetInput, now: string): Wid
   return widgetById(db, id);
 }
 
-function widgetById(db: Database, id: string): Widget {
+/**
+ * Returns the Widget with the id and its live children, also if it is Archived. Throws
+ * `StorageError` `not_found` if there is none.
+ */
+export function widgetById(db: Database, id: string): Widget {
   const tree = treeOf(db);
   return toWidget(tree, findWidget(tree, id));
+}
+
+/**
+ * Returns the Widget that holds the Widget with the id, with its live children, or `undefined` if a
+ * Dashboard holds it. Throws `StorageError` `not_found` if there is no Widget with the id.
+ */
+export function parentWidgetOf(db: Database, id: string): Widget | undefined {
+  const tree = treeOf(db);
+  const row = findWidget(tree, id);
+  return row.parentId === null ? undefined : toWidget(tree, findWidget(tree, row.parentId));
 }
 
 interface UpdateWidgetInput {
