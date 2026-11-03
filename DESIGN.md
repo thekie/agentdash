@@ -98,4 +98,4 @@ Every leaf Widget shows its own relative timestamp at the top right (`ink-3`, 12
 ## Open
 
 - Icon per KPI (would need a config field in #5). Until then the generic glyph.
-- Additions beyond #5/#9 to confirm while building: the checklist count chip, "N done items hidden", the connection card states and position-based tints.
+- The connection card states, which wait for live updates.

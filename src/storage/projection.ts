@@ -129,9 +129,13 @@ export interface ResolvedProjection {
   slots: Record<string, string | string[]>;
 }
 
-/** Describes a problem in a Projection. `missingColumn` is the key of an Archived column. */
+/**
+ * Describes a problem in a Projection. `missingColumn` is the key of an Archived column, and
+ * `archivedStore` is the name of an Archived Data Store.
+ */
 export interface Problem extends Issue {
   missingColumn?: string;
+  archivedStore?: string;
 }
 
 interface Resolver {
@@ -163,7 +167,11 @@ function addSource(r: Resolver, ref: string, path: Path): Source | undefined {
     return undefined;
   }
   if (store.archivedAt !== null) {
-    r.problems.push({ path, problem: `Data Store "${store.name}" is Archived` });
+    r.problems.push({
+      path,
+      problem: `Data Store "${store.name}" is Archived`,
+      archivedStore: store.name,
+    });
     if (r.form === "readable") return undefined;
   }
   const source: Source = { alias: `t${r.sources.length}`, store };
@@ -576,6 +584,7 @@ export function storedProjection(
 export interface Broken {
   reason: string;
   missingColumn?: string;
+  archivedStore?: string;
 }
 
 /**
@@ -591,6 +600,7 @@ export function presentProjection(
   const broken: Broken | undefined = problem && {
     reason: problem.problem,
     ...(problem.missingColumn !== undefined && { missingColumn: problem.missingColumn }),
+    ...(problem.archivedStore !== undefined && { archivedStore: problem.archivedStore }),
   };
   const written = projection ? formatProjection(projection, "readable") : stored;
   return broken ? { projection: written, broken } : { projection: written };

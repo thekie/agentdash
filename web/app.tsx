@@ -1,51 +1,14 @@
-import {
-  type CSSProperties,
-  type MouseEvent,
-  type ReactNode,
-  useEffect,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { DashboardSummary, DashboardView, WidgetView } from "../src/web-api.ts";
+import { Link, navigate } from "./link.tsx";
+import { RelativeTime } from "./time.tsx";
+import { Widgets } from "./widgets.tsx";
 
 const currentPath = () => decodeURIComponent(location.pathname).replace(/^\/|\/$/g, "");
 const subscribeToHistory = (onChange: () => void) => {
   addEventListener("popstate", onChange);
   return () => removeEventListener("popstate", onChange);
 };
-
-function navigate(path: string, options: { replace?: boolean } = {}) {
-  history[options.replace ? "replaceState" : "pushState"](null, "", `/${path}`);
-  dispatchEvent(new PopStateEvent("popstate"));
-}
-
-interface LinkProps {
-  path: string;
-  className?: string | undefined;
-  style?: CSSProperties;
-  current?: boolean;
-  children: ReactNode;
-}
-
-function Link(props: LinkProps) {
-  const onClick = (event: MouseEvent) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-      return;
-    event.preventDefault();
-    navigate(props.path);
-  };
-  return (
-    <a
-      href={`/${props.path}`}
-      className={props.className}
-      style={props.style}
-      aria-current={props.current ? "page" : undefined}
-      onClick={onClick}
-    >
-      {props.children}
-    </a>
-  );
-}
 
 /** `missing` stands for a 404, `undefined` for a read that has not finished. */
 function useJson<T>(url: string): T | "missing" | undefined {
@@ -62,29 +25,6 @@ function useJson<T>(url: string): T | "missing" | undefined {
     };
   }, [url]);
   return state?.url === url ? state.value : undefined;
-}
-
-const relative = new Intl.RelativeTimeFormat("en", { style: "narrow", numeric: "auto" });
-const units = [
-  ["day", 86_400],
-  ["hour", 3_600],
-  ["minute", 60],
-] as const;
-
-/** Returns how long ago `iso` was, such as "2h ago" or "just now". */
-export function timeAgo(iso: string, now = Date.now()): string {
-  const seconds = (now - Date.parse(iso)) / 1000;
-  if (seconds < 60) return "just now";
-  const [unit, size] = units.find(([, size]) => seconds >= size) ?? units[2];
-  return relative.format(-Math.floor(seconds / size), unit);
-}
-
-function RelativeTime({ iso, className }: { iso: string; className?: string }) {
-  return (
-    <time className={className} dateTime={iso} title={new Date(iso).toLocaleString()}>
-      {timeAgo(iso)}
-    </time>
-  );
 }
 
 function latestChange(dashboard: DashboardView): string {
@@ -155,28 +95,6 @@ function Breadcrumbs({ tree, dashboard }: { tree: DashboardSummary[]; dashboard:
   );
 }
 
-function Widget({ widget }: { widget: WidgetView }) {
-  const children = widget.children.map((child) => <Widget key={child.id} widget={child} />);
-  if (widget.type === "columns") return <div className="cols">{children}</div>;
-  if (widget.type === "section") {
-    return (
-      <section className="sec">
-        {widget.title && <h2>{widget.title}</h2>}
-        <div className="stack">{children}</div>
-      </section>
-    );
-  }
-  return (
-    <section className="w" aria-label={widget.title ?? widget.type}>
-      <div className="wh">
-        <h2>{widget.title ?? widget.type}</h2>
-        <RelativeTime className="ts" iso={widget.updatedAt} />
-      </div>
-      <p className="kind">{widget.type}</p>
-    </section>
-  );
-}
-
 function DashboardPage({ tree, path }: { tree: DashboardSummary[]; path: string }) {
   const dashboard = useJson<DashboardView>(`/api/dashboards/${encodeURI(path)}`);
   if (dashboard === undefined) return null;
@@ -208,11 +126,7 @@ function DashboardPage({ tree, path }: { tree: DashboardSummary[]; path: string 
           Updated <RelativeTime iso={latestChange(dashboard)} />
         </span>
       </header>
-      <div className="stack">
-        {dashboard.widgets.map((w) => (
-          <Widget key={w.id} widget={w} />
-        ))}
-      </div>
+      <Widgets widgets={dashboard.widgets} />
     </div>
   );
 }

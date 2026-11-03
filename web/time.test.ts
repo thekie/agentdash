@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { timeAgo } from "./app.tsx";
+import { timeAgo } from "./time.tsx";
 
 const now = Date.parse("2026-11-03T12:00:00Z");
 

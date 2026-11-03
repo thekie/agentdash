@@ -76,6 +76,7 @@ test("a Widget whose Data Store is Archived is broken", ({ storage }) => {
   storage.archiveStore({ id: store.id, expectedVersion: store.version });
   expect(storage.dashboard(health.id).widgets[0]?.broken).toEqual({
     reason: 'Data Store "weight_log" is Archived',
+    archivedStore: "weight_log",
   });
 });
 
