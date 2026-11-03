@@ -3,7 +3,7 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ColumnType } from "../src/storage/storage.ts";
 import type { WidgetView } from "../src/web-api.ts";
-import { Chart } from "./chart.tsx";
+import { Chart, seriesColor } from "./chart.tsx";
 import { formatDate, formatValue, splitUnit } from "./format.ts";
 import { Link } from "./link.tsx";
 import { RelativeTime } from "./time.tsx";
@@ -11,26 +11,29 @@ import {
   type ChecklistItem,
   chartData,
   checklistRows,
+  columnType,
   isOverdue,
   kpiData,
   openFirst,
   type ProgressRow,
   progressRows,
+  type Result,
+  type Slots,
+  slotOf,
   smoothPath,
 } from "./widget-data.ts";
 
-type Of<T extends WidgetView["type"]> = Extract<WidgetView, { type: T }>;
-type Result = NonNullable<WidgetView["result"]>;
+type WidgetOf<T extends WidgetView["type"]> = Extract<WidgetView, { type: T }>;
 
 const tints = ["blue", "peach", "mint", "lilac", "amber"] as const;
 type Tint = (typeof tints)[number];
 
-function slotsOf(widget: WidgetView): Record<string, string | string[]> {
+function projectionSlots(widget: WidgetView): Slots {
   return ("projection" in widget && widget.projection?.slots) || {};
 }
 
 function hasIconTile(widget: WidgetView): boolean {
-  return widget.type === "kpi" || (widget.type === "progress" && !slotsOf(widget).label);
+  return widget.type === "kpi" || (widget.type === "progress" && !projectionSlots(widget).label);
 }
 
 /** Returns the tint of each Widget with an icon tile. KPI tiles and link tiles count apart. */
@@ -131,8 +134,8 @@ function Change(props: { type: ColumnType; latest: number; previous: number; isU
   );
 }
 
-function Kpi({ widget, result, tint }: { widget: Of<"kpi">; result: Result; tint: Tint }) {
-  const { type, values } = kpiData(result, slotsOf(widget));
+function Kpi({ widget, result, tint }: { widget: WidgetOf<"kpi">; result: Result; tint: Tint }) {
+  const { type, values } = kpiData(result, projectionSlots(widget));
   const [latest, previous] = [values.at(-1), values.at(-2)];
   return (
     <Card widget={widget} className="kpi">
@@ -203,11 +206,11 @@ function Over({ row, isUpGood }: { row: ProgressRow; isUpGood: boolean }) {
   return <span className={`chip ${isUpGood ? "good" : "bad"}`}>{percent}% over</span>;
 }
 
-function Progress(props: { widget: Of<"progress">; result: Result; tint: Tint | undefined }) {
+function Progress(props: { widget: WidgetOf<"progress">; result: Result; tint: Tint | undefined }) {
   const { widget, result, tint } = props;
-  const slots = slotsOf(widget);
+  const slots = projectionSlots(widget);
   const rows = progressRows(result, slots, widget.config.target);
-  const type = result.columns.find((c) => c.name === slots.value)?.type ?? { type: "text" };
+  const type = columnType(result, slotOf(slots, "value")) ?? { type: "text" };
   const isUpGood = widget.config.goodDirection !== "down";
   const [single] = rows;
   if (tint && single) {
@@ -261,7 +264,7 @@ function Progress(props: { widget: Of<"progress">; result: Result; tint: Tint | 
 
 const isNumeric = (type: ColumnType) => type.type === "number" || type.type === "money";
 
-function Table({ widget, result }: { widget: Of<"table">; result: Result }) {
+function Table({ widget, result }: { widget: WidgetOf<"table">; result: Result }) {
   return (
     <Card widget={widget} className="table">
       <Head widget={widget} />
@@ -322,14 +325,14 @@ function Item({ item }: { item: ChecklistItem }) {
   );
 }
 
-function Checklist({ widget }: { widget: Of<"checklist"> }) {
-  const listed = widget.result
-    ? checklistRows(widget.result, slotsOf(widget))
+function Checklist({ widget }: { widget: WidgetOf<"checklist"> }) {
+  const sourceItems = widget.result
+    ? checklistRows(widget.result, projectionSlots(widget))
     : widget.config.items;
-  const items = openFirst(listed ?? []);
+  const items = openFirst(sourceItems ?? []);
   const doneCount = items.filter((i) => i.done).length;
   const isHiding = widget.config.done === "hide";
-  const shown = isHiding ? items.filter((i) => !i.done) : items;
+  const shownItems = isHiding ? items.filter((i) => !i.done) : items;
   return (
     <Card widget={widget} className="checklist">
       <Head widget={widget}>
@@ -339,7 +342,7 @@ function Checklist({ widget }: { widget: Of<"checklist"> }) {
       </Head>
       {items.length === 0 && <NoData />}
       <ul className="cl">
-        {shown.map((item, i) => (
+        {shownItems.map((item, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: Two items can share a text, and the order is fixed.
           <Item key={i} item={item} />
         ))}
@@ -366,7 +369,7 @@ const markdownComponents: Components = {
   },
 };
 
-function Note({ widget }: { widget: Of<"note"> }) {
+function Note({ widget }: { widget: WidgetOf<"note"> }) {
   return (
     <Card widget={widget} className="note">
       {widget.title && <Head widget={widget} />}
@@ -384,7 +387,7 @@ function Note({ widget }: { widget: Of<"note"> }) {
   );
 }
 
-function DashboardLink({ widget, tint }: { widget: Of<"dashboardLink">; tint: Tint }) {
+function DashboardLink({ widget, tint }: { widget: WidgetOf<"dashboardLink">; tint: Tint }) {
   const { target } = widget;
   if (!target) return null;
   return (
@@ -393,7 +396,7 @@ function DashboardLink({ widget, tint }: { widget: Of<"dashboardLink">; tint: Ti
         {target.icon ?? "📄"}
       </span>
       <span className="tx">
-        <b>{widget.title ?? target.title}</b>
+        <b>{target.title}</b>
         {target.description && <small>{target.description}</small>}
       </span>
       <span className="go" aria-hidden="true">
@@ -421,7 +424,7 @@ function Broken({
             🗄
           </span>
           <div>
-            Data Store <code>{broken.archivedStore}</code> was archived. An Agent can restore it or
+            Data Store <code>{broken.archivedStore}</code> was Archived. An Agent can restore it or
             point this Widget elsewhere.
           </div>
         </div>
@@ -436,7 +439,7 @@ function Broken({
           !
         </span>
         <div>
-          <b>Can’t draw this Widget</b>
+          <b>Cannot draw this Widget</b>
           {broken.reason.charAt(0).toUpperCase() + broken.reason.slice(1)}. Ask an Agent to fix it.
         </div>
       </div>
@@ -444,28 +447,26 @@ function Broken({
   );
 }
 
-function ChartCard({ widget, result }: { widget: Of<"chart">; result: Result }) {
-  const data = chartData(result, slotsOf(widget));
+function ChartCard({ widget, result }: { widget: WidgetOf<"chart">; result: Result }) {
+  const data = chartData(result, projectionSlots(widget));
   return (
     <Card widget={widget}>
-      <div className="wh">
-        <h2>{widget.title}</h2>
+      <Head widget={widget}>
         {data.series.length > 1 && (
           <ul className="legend">
             {data.series.map((s, j) => (
               <li key={s.name}>
-                <i style={{ background: `var(--s${(j % 4) + 1})` }} />
+                <i style={{ background: seriesColor(j) }} />
                 {s.name}
               </li>
             ))}
           </ul>
         )}
-        <RelativeTime className="ts" iso={widget.updatedAt} />
-      </div>
+      </Head>
       {data.xs.length === 0 ? (
         <NoData />
       ) : (
-        <Chart data={data} mark={widget.config.mark} stacked={widget.config.stacked ?? false} />
+        <Chart data={data} mark={widget.config.mark} isStacked={widget.config.stacked ?? false} />
       )}
     </Card>
   );

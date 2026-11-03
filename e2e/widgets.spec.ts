@@ -58,7 +58,7 @@ test("hovering a stacked bar shows its total and each series", async ({ page }) 
   await expect(chart.getByRole("tooltip")).toHaveText("W41210 minRun90 minRide120 min");
 });
 
-test("a checklist puts open items first and marks the overdue ones", async ({ page }) => {
+test("a checklist shows open items first, with their due dates", async ({ page }) => {
   await page.goto("/health");
   const list = widget(page, "This week");
   await expect(list.getByRole("listitem")).toHaveText([
@@ -76,15 +76,18 @@ test("a checklist that hides done items counts them instead", async ({ page }) =
   await expect(list.getByText("1 done item hidden")).toBeVisible();
 });
 
-test("a note renders markdown without raw HTML, and external links open in a new tab", async ({
-  page,
-}) => {
+test("a note renders markdown and drops raw HTML", async ({ page }) => {
   await page.goto("/health");
   const note = widget(page, "Tips");
   await expect(note.locator("strong")).toHaveText("water");
   await expect(note.locator("del")).toHaveText("Skip");
   await expect(note.locator("b")).toHaveCount(0);
-  await expect(note.getByRole("link", { name: "the guide ↗" })).toHaveAttribute("target", "_blank");
+});
+
+test("an external link in a note opens in a new tab", async ({ page }) => {
+  await page.goto("/health");
+  const link = widget(page, "Tips").getByRole("link", { name: "the guide ↗" });
+  await expect(link).toHaveAttribute("target", "_blank");
 });
 
 test("a Dashboard link opens its target", async ({ page }) => {
@@ -107,13 +110,13 @@ for (const [name, text] of [
 test("a broken Widget says why it cannot draw", async ({ page }) => {
   await page.goto("/finance/budget/groceries");
   await expect(widget(page, "Weekly km").getByRole("alert")).toContainText(
-    'Can’t draw this WidgetUnknown output column "km". Ask an Agent to fix it.',
+    'Cannot draw this WidgetUnknown output column "km". Ask an Agent to fix it.',
   );
 });
 
 test("a Widget on an Archived Data Store names it", async ({ page }) => {
   await page.goto("/finance/budget/groceries");
-  await expect(widget(page, "Holdings")).toContainText("Data Store holdings was archived.");
+  await expect(widget(page, "Holdings")).toContainText("Data Store holdings was Archived.");
 });
 
 for (const [colorScheme, panel] of [

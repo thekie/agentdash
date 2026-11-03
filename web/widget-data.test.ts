@@ -65,7 +65,10 @@ test("each y column is one series", () => {
   ]);
 });
 
-test("a kpi without x reads the first row and with x every row", () => {
+test.for([
+  [{ y: "v" }, [1]],
+  [{ x: "d", y: "v" }, [1, 3]],
+] as const)("a kpi with Slots %o reads %o", ([slots, expected]) => {
   const r = result(
     [
       ["d", { type: "date" }],
@@ -76,28 +79,30 @@ test("a kpi without x reads the first row and with x every row", () => {
       { d: "2026-02-01", v: 3 },
     ],
   );
-  expect(kpiData(r, { y: "v" }).values).toEqual([1]);
-  expect(kpiData(r, { x: "d", y: "v" }).values).toEqual([1, 3]);
+  expect(kpiData(r, slots).values).toEqual(expected);
 });
 
 test("a kpi skips empty values", () => {
   expect(kpiData(result([["v", num]], [{ v: null }]), { y: "v" }).values).toEqual([]);
 });
 
-test("the target Slot wins over config.target", () => {
-  const r = result(
-    [
-      ["n", text],
-      ["v", num],
-      ["t", num],
-    ],
-    [{ n: "A", v: 5, t: 10 }],
-  );
-  expect(progressRows(r, { label: "n", value: "v", target: "t" }, 99)).toEqual([
-    { label: "A", value: 5, target: 10 },
-  ]);
-  expect(progressRows(r, { value: "v" }, 99)).toEqual([{ value: 5, target: 99 }]);
-});
+test.for([
+  [{ label: "n", value: "v", target: "t" }, [{ label: "A", value: 5, target: 10 }]],
+  [{ value: "v" }, [{ value: 5, target: 99 }]],
+] as const)(
+  "progress Slots %o read %o, the target Slot winning over config.target",
+  ([slots, expected]) => {
+    const r = result(
+      [
+        ["n", text],
+        ["v", num],
+        ["t", num],
+      ],
+      [{ n: "A", v: 5, t: 10 }],
+    );
+    expect(progressRows(r, slots, 99)).toEqual(expected);
+  },
+);
 
 test("checklist rows come from the label, done and due Slots", () => {
   const r = result(

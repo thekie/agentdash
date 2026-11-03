@@ -2,8 +2,10 @@ import type { ColumnType } from "../src/storage/storage.ts";
 import type { WidgetView } from "../src/web-api.ts";
 import { formatValue } from "./format.ts";
 
-type Result = NonNullable<WidgetView["result"]>;
-type Slots = Record<string, string | string[]>;
+/** Describes the rows of a Projection as the web UI reads them. */
+export type Result = NonNullable<WidgetView["result"]>;
+/** Describes the Slots of a Projection: each names one output column or a list of them. */
+export type Slots = Record<string, string | string[]>;
 
 /** Describes one line or one bar colour of a chart. */
 export interface Series {
@@ -18,17 +20,19 @@ export interface ChartData {
   yType: ColumnType;
 }
 
-function columnType(result: Result, name: string | undefined): ColumnType | undefined {
+/** Returns the type of the output column `name`. */
+export function columnType(result: Result, name: string | undefined): ColumnType | undefined {
   return result.columns.find((c) => c.name === name)?.type;
 }
 
-function list(slot: string | string[] | undefined): string[] {
+function columnsOf(slot: string | string[] | undefined): string[] {
   if (slot === undefined) return [];
   return typeof slot === "string" ? [slot] : slot;
 }
 
-function slotOf(slots: Slots, name: string): string | undefined {
-  const [first] = list(slots[name]);
+/** Returns the first column that the Slot `name` names. */
+export function slotOf(slots: Slots, name: string): string | undefined {
+  const [first] = columnsOf(slots[name]);
   return first;
 }
 
@@ -40,28 +44,28 @@ const fallbackType: ColumnType = { type: "number", format: "plain" };
  */
 export function chartData(result: Result, slots: Slots): ChartData {
   const x = slotOf(slots, "x") ?? "";
-  const ys = list(slots.y);
-  const by = slotOf(slots, "series");
+  const ys = columnsOf(slots.y);
+  const seriesColumn = slotOf(slots, "series");
   const xType = columnType(result, x) ?? { type: "text" };
   const yType = columnType(result, ys[0]) ?? fallbackType;
   const keys = [...new Set(result.rows.map((row) => String(row[x])))];
   const xs = keys.map((key) =>
     formatValue(xType, result.rows.find((r) => String(r[x]) === key)?.[x]),
   );
-  const at = (key: string, rows: Record<string, unknown>[], y: string) =>
+  const valueAt = (key: string, rows: Record<string, unknown>[], y: string) =>
     Number(rows.find((r) => String(r[x]) === key)?.[y] ?? 0);
-  if (by === undefined) {
+  if (seriesColumn === undefined) {
     return {
       xs,
       yType,
-      series: ys.map((y) => ({ name: y, values: keys.map((k) => at(k, result.rows, y)) })),
+      series: ys.map((y) => ({ name: y, values: keys.map((k) => valueAt(k, result.rows, y)) })),
     };
   }
   const y = ys[0] ?? "";
-  const names = [...new Set(result.rows.map((row) => String(row[by])))];
+  const names = [...new Set(result.rows.map((row) => String(row[seriesColumn])))];
   const series = names.map((name) => {
-    const rows = result.rows.filter((r) => String(r[by]) === name);
-    return { name, values: keys.map((k) => at(k, rows, y)) };
+    const rows = result.rows.filter((r) => String(r[seriesColumn]) === name);
+    return { name, values: keys.map((k) => valueAt(k, rows, y)) };
   });
   return { xs, yType, series };
 }
@@ -155,8 +159,8 @@ function niceStep(raw: number): number {
 /**
  * Returns a y axis with three to four round ticks that covers `values`. A bar axis starts at zero.
  */
-export function niceScale(values: number[], startsAtZero: boolean): Scale {
-  const low = startsAtZero ? Math.min(0, ...values) : Math.min(...values);
+export function niceScale(values: number[], isZeroBased: boolean): Scale {
+  const low = isZeroBased ? Math.min(0, ...values) : Math.min(...values);
   const high = Math.max(...values);
   const step = niceStep((high - low || Math.abs(high) || 1) / 3);
   const min = Math.floor(low / step) * step;
@@ -168,10 +172,10 @@ export function niceScale(values: number[], startsAtZero: boolean): Scale {
 
 /** Returns an SVG path through `points` as a smooth Catmull-Rom curve. */
 export function smoothPath(points: [number, number][]): string {
-  const at = (i: number) => points[Math.max(0, Math.min(points.length - 1, i))] ?? [0, 0];
-  let d = `M${at(0).join(",")}`;
+  const point = (i: number) => points[Math.max(0, Math.min(points.length - 1, i))] ?? [0, 0];
+  let d = `M${point(0).join(",")}`;
   for (let i = 0; i < points.length - 1; i++) {
-    const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+    const [p0, p1, p2, p3] = [point(i - 1), point(i), point(i + 1), point(i + 2)];
     const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
     const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
     d += ` C${c1.join(",")} ${c2.join(",")} ${p2.join(",")}`;

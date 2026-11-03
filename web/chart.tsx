@@ -119,26 +119,18 @@ function Tooltip({
   );
 }
 
-/** Returns the label that names a chart for a screen reader. */
-function chartLabel(data: ChartData, mark: "line" | "bar", stacked: boolean): string {
-  const kind = mark === "line" ? "Line" : stacked ? "Stacked bar" : "Bar";
+function chartLabel(data: ChartData, mark: "line" | "bar", isStacked: boolean): string {
+  const kind = mark === "line" ? "Line" : isStacked ? "Stacked bar" : "Bar";
   const names = data.series.map((s) => s.name).join(", ");
   return `${kind} chart of ${names}, ${data.xs[0]} to ${data.xs.at(-1)}`;
 }
 
 /** Draws a line or bar chart on one y axis, with a tooltip for the x position under the pointer. */
-export function Chart({
-  data,
-  mark,
-  stacked,
-}: {
-  data: ChartData;
-  mark: "line" | "bar";
-  stacked: boolean;
-}) {
+export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked: boolean }) {
+  const { data, mark } = props;
   const gradient = useId();
   const [hovered, setHovered] = useState<number>();
-  const isStacked = mark === "bar" && stacked;
+  const isStacked = mark === "bar" && props.isStacked;
   const tops = isStacked
     ? data.xs.map((_, i) => data.series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0))
     : data.series.flatMap((s) => s.values);
@@ -150,13 +142,17 @@ export function Chart({
     y: (v) => bottom - ((v - scale.min) / (scale.max - scale.min)) * (bottom - top),
   };
   const every = Math.ceil(data.xs.length / 8);
-  const point = (event: PointerEvent<HTMLDivElement>) => {
+  const showTooltipAt = (event: PointerEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
     const index = Math.floor((((event.clientX - box.left) / box.width) * 800 - left) / band);
     setHovered(index >= 0 && index < data.xs.length ? index : undefined);
   };
   return (
-    <div className="plot" onPointerMove={point} onPointerLeave={() => setHovered(undefined)}>
+    <div
+      className="plot"
+      onPointerMove={showTooltipAt}
+      onPointerLeave={() => setHovered(undefined)}
+    >
       <svg
         className={hovered === undefined ? "chart" : "chart dim"}
         viewBox="0 0 800 236"
