@@ -310,7 +310,7 @@ h1 {
   line-height: 1.6;
   color: var(--ink-2);
 }
-.empty .lead b {
+.lead b {
   color: var(--ink);
 }
 .client {
