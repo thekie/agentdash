@@ -166,11 +166,12 @@ export function appendRows(db: Database, input: AppendRowsInput, now: string): A
   const result: AppendResult = { inserted: [], updated: [], skipped: [] };
   const conflicts: KeyConflict[] = [];
   const insertedBy = new Map<number, number>();
+  const written = new Map<number, RowVersion>();
   for (const [index, values] of parsed.entries()) {
     const outcome = appendOne(db, store, values, input.onConflict ?? "error", now);
     if ("match" in outcome) conflicts.push(keyConflict(index, outcome.match, insertedBy));
     else if ("skipped" in outcome) result.skipped.push(outcome.skipped);
-    else result[outcome.list].push(outcome.row);
+    else reportWrite(result, written, outcome);
     if ("list" in outcome && outcome.list === "inserted") insertedBy.set(outcome.row.id, index);
   }
   if (conflicts.length > 0) {
@@ -180,6 +181,24 @@ export function appendRows(db: Database, input: AppendRowsInput, now: string): A
     });
   }
   return result;
+}
+
+/**
+ * Adds a written row to the result. A row that an earlier row of the same append wrote keeps its
+ * first entry, with the latest version.
+ */
+function reportWrite(
+  result: AppendResult,
+  written: Map<number, RowVersion>,
+  outcome: { list: "inserted" | "updated"; row: RowVersion },
+): void {
+  const earlier = written.get(outcome.row.id);
+  if (earlier) {
+    earlier.version = outcome.row.version;
+    return;
+  }
+  result[outcome.list].push(outcome.row);
+  written.set(outcome.row.id, outcome.row);
 }
 
 /**
@@ -329,7 +348,7 @@ export function archivedRows(db: Database, ref: string): Row[] {
   return rowsWhere(db, ref, "IS NOT NULL");
 }
 
-interface ListRowsInput {
+export interface ListRowsInput {
   store: string;
   filter?: ProjectionInput["filter"];
   limit?: number | undefined;
@@ -337,9 +356,8 @@ interface ListRowsInput {
 
 /**
  * Returns the live rows of a Data Store that pass the filter, newest first, at most `limit` (100 by
- * default). `truncated` is true if more rows pass. The filter takes the Projection `filter` syntax.
- * Throws `StorageError` `invalid` if the filter names an unknown column or a value of the wrong
- * type.
+ * default), and `truncated` is true if more rows pass. Throws `StorageError` `not_found` for an
+ * unknown Data Store, `archived` for an Archived one, and `invalid` for a bad filter.
  */
 export function listRows(
   db: Database,

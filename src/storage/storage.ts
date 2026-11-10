@@ -6,6 +6,7 @@ import {
   appendRows,
   archivedRows,
   archiveRow,
+  type ListRowsInput,
   listRows,
   liveRows,
   restoreRow,
@@ -91,7 +92,7 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     restoreStore: write(restoreStore),
 
     rows: (store: string) => liveRows(db, store),
-    listRows: (input: Parameters<typeof listRows>[1]) => listRows(db, input, now()),
+    listRows: (input: ListRowsInput) => listRows(db, input, now()),
     archivedRows: (store: string) => archivedRows(db, store),
     appendRows: write(appendRows),
     updateRows: write(updateRows),

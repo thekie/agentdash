@@ -99,6 +99,20 @@ test("onConflict update re-syncs matching rows, so repeating the append changes 
   expect(storage.rows("budget").map((r) => r.values.amount)).toEqual([950]);
 });
 
+test("an append that updates its own inserted row reports it once at its latest version", ({
+  storage,
+}) => {
+  createBudget(storage);
+  const row = { month: "2026-01-01", category: "rent" };
+  const result = storage.appendRows({
+    store: "budget",
+    onConflict: "update",
+    rows: [row, { ...row, amount: 1 }, { ...row, amount: 2 }],
+  });
+  expect(result).toEqual({ inserted: [{ id: 1, version: 3 }], updated: [], skipped: [] });
+  expect(storage.rows("budget")).toMatchObject([{ id: 1, version: 3 }]);
+});
+
 test("onConflict skip keeps matching rows and appends the rest", ({ storage }) => {
   createBudget(storage);
   storage.appendRows({
