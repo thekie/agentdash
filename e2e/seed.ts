@@ -219,6 +219,19 @@ for (const widget of [
     projection: { from: "distance", slots: { x: "week", y: ["run", "ride"] } },
   },
   {
+    type: "columns",
+    config: {},
+    children: [
+      {
+        type: "chart",
+        title: "Weight, half width",
+        config: { mark: "line" },
+        projection: { from: "weight", slots: { x: "date", y: "kg" } },
+      },
+      { type: "note", title: "Beside the chart", config: { markdown: "Weigh in weekly." } },
+    ],
+  },
+  {
     type: "checklist",
     title: "This week",
     config: {
