@@ -50,7 +50,7 @@ for (const [name, label] of [
   });
 }
 
-/** The font size an axis label is drawn at on screen, after any SVG scaling. */
+/** Returns the on-screen font size of the first axis label in `name`, after any SVG scaling. */
 const axisLabelSize = (page: Page, name: string) =>
   widget(page, name)
     .locator(".chart text")
@@ -60,12 +60,20 @@ const axisLabelSize = (page: Page, name: string) =>
       return Number.parseFloat(getComputedStyle(t).fontSize) * scale;
     });
 
-for (const colorScheme of ["light", "dark"] as const) {
-  test(`a chart in columns draws axis labels at full size in ${colorScheme}`, async ({ page }) => {
+for (const [colorScheme, width] of [
+  ["light", 1280],
+  ["dark", 1280],
+  ["light", 700],
+] as const) {
+  test(`a chart in columns draws axis labels at full size, ${colorScheme} at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ colorScheme });
     await page.goto("/health");
-    expect(await axisLabelSize(page, "Weight")).toBe(12);
-    expect(await axisLabelSize(page, "Weight, half width")).toBe(12);
+    for (const name of ["Weight", "Weight, half width"]) {
+      await expect.poll(() => axisLabelSize(page, name)).toBeCloseTo(12, 2);
+    }
   });
 }
 

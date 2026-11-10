@@ -7,17 +7,18 @@ const rightGap = 16;
 const top = 16;
 const bottom = 200;
 const height = 236;
-/** Horizontal room one x label needs, so labels thin out on narrow charts. */
+/** Horizontal room one x label needs. */
 const labelSpace = 72;
 
-/** Tracks the content width of `ref` in CSS pixels, so the chart draws one SVG unit per pixel. */
+/** Returns the rendered width of `ref` in CSS pixels, updated as it resizes. */
 function useWidth(ref: RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    setWidth(el.clientWidth);
-    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    const measure = () => setWidth(el.getBoundingClientRect().width);
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
   }, [ref]);
@@ -80,7 +81,7 @@ function GroupedBars({ data, g, hovered }: BarsProps) {
             key={s.name}
             x={g.x(i) - width / 2 + (j * width) / count + 1.5}
             y={Math.min(g.y(value), g.y(0))}
-            width={width / count - 3}
+            width={Math.max(1, width / count - 3)}
             height={Math.abs(g.y(0) - g.y(value))}
             rx={7}
             style={{ fill: seriesColor(j) }}
@@ -150,7 +151,7 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
   const [hovered, setHovered] = useState<number>();
   const plot = useRef<HTMLDivElement>(null);
   const width = useWidth(plot);
-  const right = Math.max(width - rightGap, left + 1);
+  const right = width - rightGap;
   const isStacked = mark === "bar" && props.isStacked;
   const tops = isStacked
     ? data.xs.map((_, i) => data.series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0))
@@ -175,65 +176,67 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
       onPointerMove={showTooltipAt}
       onPointerLeave={() => setHovered(undefined)}
     >
-      <svg
-        className={hovered === undefined ? "chart" : "chart dim"}
-        viewBox={`0 0 ${Math.max(width, right + rightGap)} ${height}`}
-        role="img"
-        aria-label={chartLabel(data, mark, isStacked)}
-      >
-        <defs>
-          <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" style={{ stopColor: seriesColor(0), stopOpacity: 0.2 }} />
-            <stop offset="1" style={{ stopColor: seriesColor(0), stopOpacity: 0 }} />
-          </linearGradient>
-        </defs>
-        {scale.ticks.map((t) => (
-          <g key={t}>
-            <line
-              className={t === scale.min ? "base" : "grid"}
-              x1={left}
-              x2={right}
-              y1={g.y(t)}
-              y2={g.y(t)}
-            />
-            <text x={left - 12} y={g.y(t) + 4} textAnchor="end">
-              {formatAxisValue(data.yType, t)}
-            </text>
-          </g>
-        ))}
-        {mark === "bar" ? (
-          isStacked ? (
-            <StackedBars data={data} g={g} hovered={hovered} />
+      {width > 0 && (
+        <svg
+          className={hovered === undefined ? "chart" : "chart dim"}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={chartLabel(data, mark, isStacked)}
+        >
+          <defs>
+            <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" style={{ stopColor: seriesColor(0), stopOpacity: 0.2 }} />
+              <stop offset="1" style={{ stopColor: seriesColor(0), stopOpacity: 0 }} />
+            </linearGradient>
+          </defs>
+          {scale.ticks.map((t) => (
+            <g key={t}>
+              <line
+                className={t === scale.min ? "base" : "grid"}
+                x1={left}
+                x2={right}
+                y1={g.y(t)}
+                y2={g.y(t)}
+              />
+              <text x={left - 12} y={g.y(t) + 4} textAnchor="end">
+                {formatAxisValue(data.yType, t)}
+              </text>
+            </g>
+          ))}
+          {mark === "bar" ? (
+            isStacked ? (
+              <StackedBars data={data} g={g} hovered={hovered} />
+            ) : (
+              <GroupedBars data={data} g={g} hovered={hovered} />
+            )
           ) : (
-            <GroupedBars data={data} g={g} hovered={hovered} />
-          )
-        ) : (
-          <Lines data={data} g={g} gradient={gradient} />
-        )}
-        {hovered !== undefined && (
-          <g>
-            <line className="guide" x1={g.x(hovered)} x2={g.x(hovered)} y1={top} y2={bottom} />
-            {mark === "line" &&
-              data.series.map((s, j) => (
-                <circle
-                  key={s.name}
-                  className="pt"
-                  cx={g.x(hovered)}
-                  cy={g.y(s.values[hovered] ?? 0)}
-                  r={6}
-                  style={{ stroke: seriesColor(j) }}
-                />
-              ))}
-          </g>
-        )}
-        {data.xs.map((x, i) =>
-          i % every ? null : (
-            <text key={x} x={g.x(i)} y={226} textAnchor="middle">
-              {x}
-            </text>
-          ),
-        )}
-      </svg>
+            <Lines data={data} g={g} gradient={gradient} />
+          )}
+          {hovered !== undefined && (
+            <g>
+              <line className="guide" x1={g.x(hovered)} x2={g.x(hovered)} y1={top} y2={bottom} />
+              {mark === "line" &&
+                data.series.map((s, j) => (
+                  <circle
+                    key={s.name}
+                    className="pt"
+                    cx={g.x(hovered)}
+                    cy={g.y(s.values[hovered] ?? 0)}
+                    r={6}
+                    style={{ stroke: seriesColor(j) }}
+                  />
+                ))}
+            </g>
+          )}
+          {data.xs.map((x, i) =>
+            i % every ? null : (
+              <text key={x} x={g.x(i)} y={226} textAnchor="middle">
+                {x}
+              </text>
+            ),
+          )}
+        </svg>
+      )}
       {hovered !== undefined && (
         <Tooltip data={data} index={hovered} x={g.x(hovered)} isStacked={isStacked} />
       )}
