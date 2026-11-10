@@ -17,7 +17,8 @@
     "test": "vitest",
     "e2e": "vite build && playwright test",
     "verify": "npm run check && npm run e2e",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "prototype:many-series": "vite build && rm -rf .data/prototype-many-series && node e2e/prototype-many-series-seed.ts .data/prototype-many-series && node src/main.ts --port 4411 --data-dir .data/prototype-many-series"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",
