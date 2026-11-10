@@ -23,7 +23,16 @@ const Chart = z.strictObject({
   type: z.literal("chart"),
   title: Title.optional(),
   config: z
-    .strictObject({ mark: z.enum(["line", "bar"]), stacked: z.boolean().optional() })
+    .strictObject({
+      mark: z.enum(["line", "bar"]),
+      stacked: z.boolean().optional(),
+      additive: z
+        .boolean()
+        .optional()
+        .describe(
+          "The series add up, such as km per sport or balances per account, so the tooltip shows their total. Leave it out for prices, weights or rates. Stacked bars always show a total.",
+        ),
+    })
     .refine((c) => !c.stacked || c.mark === "bar", {
       message: "only a bar chart can be stacked",
       path: ["stacked"],

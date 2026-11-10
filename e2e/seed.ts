@@ -215,7 +215,7 @@ for (const widget of [
   {
     type: "chart",
     title: "Distance per week",
-    config: { mark: "bar" },
+    config: { mark: "bar", additive: true },
     projection: { from: "distance", slots: { x: "week", y: ["run", "ride"] } },
   },
   {

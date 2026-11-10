@@ -85,6 +85,13 @@ test("hovering a stacked bar shows its total and each series", async ({ page }) 
   await expect(chart.getByRole("tooltip")).toHaveText("W41210 minRun90 minRide120 min");
 });
 
+test("hovering grouped bars whose series add up shows their total", async ({ page }) => {
+  await page.goto("/health");
+  const chart = widget(page, "Distance per week");
+  await chart.locator(".plot").hover({ position: { x: 300, y: 100 } });
+  await expect(chart.getByRole("tooltip")).toHaveText("W4148 kmRunning18 kmCycling30 km");
+});
+
 test("a checklist shows open items first, with their due dates", async ({ page }) => {
   await page.goto("/health");
   const list = widget(page, "This week");
