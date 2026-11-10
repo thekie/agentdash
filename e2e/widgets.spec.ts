@@ -92,6 +92,24 @@ test("hovering grouped bars whose series add up shows their total", async ({ pag
   await expect(chart.getByRole("tooltip")).toHaveText("W4148 kmRunning18 kmCycling30 km");
 });
 
+test("a chart folds the smaller series into Other and names them", async ({ page }) => {
+  await page.goto("/health");
+  const chart = widget(page, "Spending by category");
+  await expect(chart.getByRole("listitem")).toHaveText(["Rent", "Groceries", "Utilities", "Other"]);
+  await chart.locator(".plot").hover({ position: { x: 400, y: 150 } });
+  await expect(chart.getByRole("tooltip")).toContainText("OtherLeisure, Gifts, Books240 €");
+});
+
+test("a chart hatches the series that repeat a colour", async ({ page }) => {
+  await page.goto("/health");
+  const segments = widget(page, "Spending, every category").locator("rect.seg");
+  const hatched = () =>
+    segments.evaluateAll((rects) =>
+      rects.map((r) => r.getAttribute("style")?.includes("url(") ?? false),
+    );
+  await expect.poll(hatched).toEqual([false, false, false, false, true, true]);
+});
+
 test("a checklist shows open items first, with their due dates", async ({ page }) => {
   await page.goto("/health");
   const list = widget(page, "This week");

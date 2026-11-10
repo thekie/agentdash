@@ -25,6 +25,7 @@
   --s2: #f2a272;
   --s3: #48c9a6;
   --s4: #b39df7;
+  --s-other: #9aa1ae;
   --tip: #12141a;
   --tip-ink: #ffffff;
   --tip-ink-2: #a3a9b6;
@@ -68,6 +69,7 @@
     --s2: #f6ae80;
     --s3: #4fd6b4;
     --s4: #bfa9ff;
+    --s-other: #6f7685;
     --tip: #f3f4f8;
     --tip-ink: #12141a;
     --tip-ink-2: #5f6672;
@@ -589,6 +591,13 @@ time.ts {
   stroke-width: 3;
   stroke-linecap: round;
 }
+.chart .dash {
+  stroke-dasharray: 7 6;
+}
+.chart .hatch {
+  fill: var(--panel);
+  opacity: 0.6;
+}
 .chart .seg {
   stroke: var(--panel);
   stroke-width: 3;
@@ -641,6 +650,10 @@ time.ts {
   align-items: center;
   gap: 6px;
   color: var(--tip-ink-2);
+}
+.tip .members {
+  font-style: normal;
+  margin-left: 2px;
 }
 .tip i {
   width: 7px;

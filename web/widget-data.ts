@@ -7,12 +7,19 @@ export type Result = NonNullable<WidgetView["result"]>;
 /** Describes the Slots of a Projection: each names one output column or a list of them. */
 export type Slots = Record<string, string | string[]>;
 
-/** Describes one line or one bar colour of a chart. `name` is shown and `key` tells series apart. */
+/**
+ * Describes one line or one bar colour of a chart. `name` is shown and `key` tells series apart.
+ * `members` names the series that the Other series sums.
+ */
 export interface Series {
   key: string;
   name: string;
   values: number[];
+  members?: string[];
 }
+
+/** Key of the Other series, which no Projection value can produce. */
+export const otherKey = "\0other";
 
 /** Describes what a chart draws: one label per x position and the series above them. */
 export interface ChartData {
@@ -79,6 +86,25 @@ export function chartData(result: Result, slots: Slots): ChartData {
     return { key: name, name, values: keys.map((k) => valueAt(k, rows, y)) };
   });
   return { xs, yType, series };
+}
+
+const total = (s: Series) => s.values.reduce((sum, v) => sum + v, 0);
+
+/**
+ * Keeps the `keep` series with the largest totals, in their order, and sums the rest into one
+ * Other series. A chart with no more than `keep` series is returned as it is.
+ */
+export function foldOther(data: ChartData, keep: number): ChartData {
+  if (data.series.length <= keep) return data;
+  const kept = new Set(data.series.toSorted((a, b) => total(b) - total(a)).slice(0, keep));
+  const rest = data.series.filter((s) => !kept.has(s));
+  const other: Series = {
+    key: otherKey,
+    name: "Other",
+    values: data.xs.map((_, i) => rest.reduce((sum, s) => sum + (s.values[i] ?? 0), 0)),
+    members: rest.map((s) => s.name),
+  };
+  return { ...data, series: [...data.series.filter((s) => kept.has(s)), other] };
 }
 
 /** Describes what a kpi draws: the latest value and, with an `x` Slot, the values before it. */

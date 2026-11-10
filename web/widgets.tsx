@@ -3,7 +3,7 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ColumnType } from "../src/storage/storage.ts";
 import type { WidgetView } from "../src/web-api.ts";
-import { Chart, seriesColor } from "./chart.tsx";
+import { Chart, seriesSwatch } from "./chart.tsx";
 import { formatDate, formatValue, splitUnit } from "./format.ts";
 import { Link } from "./link.tsx";
 import { RelativeTime } from "./time.tsx";
@@ -12,6 +12,7 @@ import {
   chartData,
   checklistRows,
   columnType,
+  foldOther,
   header,
   isOverdue,
   kpiData,
@@ -449,7 +450,8 @@ function Broken({
 }
 
 function ChartCard({ widget, result }: { widget: WidgetOf<"chart">; result: Result }) {
-  const data = chartData(result, projectionSlots(widget));
+  const all = chartData(result, projectionSlots(widget));
+  const data = widget.config.other === undefined ? all : foldOther(all, widget.config.other);
   return (
     <Card widget={widget}>
       <Head widget={widget}>
@@ -457,7 +459,7 @@ function ChartCard({ widget, result }: { widget: WidgetOf<"chart">; result: Resu
           <ul className="legend">
             {data.series.map((s, j) => (
               <li key={s.key}>
-                <i style={{ background: seriesColor(j) }} />
+                <i style={{ background: seriesSwatch(j, s.key) }} />
                 {s.name}
               </li>
             ))}

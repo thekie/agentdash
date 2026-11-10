@@ -199,6 +199,25 @@ storage.appendRows({
     { habit: "Walk", done: false },
   ],
 });
+storage.createStore({
+  name: "outlay",
+  columns: [
+    { key: "month", type: "text" },
+    { key: "category", type: "text" },
+    { key: "amount", type: "number", unit: "€" },
+  ],
+});
+storage.appendRows({
+  store: "outlay",
+  rows: [
+    ["Rent", 1200],
+    ["Groceries", 400],
+    ["Utilities", 200],
+    ["Leisure", 150],
+    ["Gifts", 60],
+    ["Books", 30],
+  ].map(([category, amount]) => ({ month: "Oct", category, amount })),
+});
 for (const widget of [
   {
     type: "chart",
@@ -217,6 +236,18 @@ for (const widget of [
     title: "Distance per week",
     config: { mark: "bar", additive: true },
     projection: { from: "distance", slots: { x: "week", y: ["run", "ride"] } },
+  },
+  {
+    type: "chart",
+    title: "Spending by category",
+    config: { mark: "bar", stacked: true, other: 3 },
+    projection: { from: "outlay", slots: { x: "month", y: "amount", series: "category" } },
+  },
+  {
+    type: "chart",
+    title: "Spending, every category",
+    config: { mark: "bar", stacked: true },
+    projection: { from: "outlay", slots: { x: "month", y: "amount", series: "category" } },
   },
   {
     type: "columns",
