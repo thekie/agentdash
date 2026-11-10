@@ -47,6 +47,14 @@ _Avoid_: query, mapping, view
 A named input a Widget type draws, such as `x`, `y`, `value` or `target`. A Projection fills each Slot with a column.
 _Avoid_: field, channel, binding
 
+**Goal**:
+A target that a progress Widget's value should reach, such as a goal weight of 80 kg or €10,000 saved. Reaching or passing it is good, whether the value gets there by rising or by falling.
+_Avoid_: objective
+
+**Limit**:
+A target that a progress Widget's value should not cross, such as a monthly grocery budget or a minimum account balance. Crossing it is bad.
+_Avoid_: cap, budget
+
 **Archive**:
 Removing a Dashboard, Widget, or Data Store from view without destroying it. Agents never delete permanently. Anything that is not Archived is **live**, so "the live Data Stores" are the ones not Archived.
 _Avoid_: delete, trash
@@ -57,3 +65,4 @@ _Avoid_: delete, trash
 - A **Widget** may hold ordered child **Widgets**
 - A data **Widget** reads one or more **Data Stores** through its **Projection**; static Widgets hold their content inline
 - Any **Agent** may change anything; there is no per-Agent ownership
+- A progress **Widget**'s target is a **Goal** when the good direction leads from where progress starts toward the target, and a **Limit** otherwise
