@@ -1,11 +1,28 @@
-import { type PointerEvent, useId, useState } from "react";
+import { type PointerEvent, type RefObject, useId, useLayoutEffect, useRef, useState } from "react";
 import { formatAxisValue, formatValue } from "./format.ts";
 import { type ChartData, niceScale, smoothPath } from "./widget-data.ts";
 
 const left = 64;
-const right = 784;
+const rightGap = 16;
 const top = 16;
 const bottom = 200;
+const height = 236;
+/** Horizontal room one x label needs, so labels thin out on narrow charts. */
+const labelSpace = 72;
+
+/** Tracks the content width of `ref` in CSS pixels, so the chart draws one SVG unit per pixel. */
+function useWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
+}
 
 /** Returns the colour of the series at `index`. Four colours repeat. */
 export const seriesColor = (index: number) => `var(--s${(index % 4) + 1})`;
@@ -92,17 +109,18 @@ function Lines({ data, g, gradient }: { data: ChartData; g: Geometry; gradient: 
 function Tooltip({
   data,
   index,
+  x,
   isStacked,
 }: {
   data: ChartData;
   index: number;
+  x: number;
   isStacked: boolean;
 }) {
   const rows = data.series.map((s, j) => ({ name: s.name, value: s.values[index] ?? 0, j }));
   const total = isStacked || rows.length === 1 ? rows.reduce((sum, r) => sum + r.value, 0) : null;
-  const left = `${((index + 0.5) / data.xs.length) * 100}%`;
   return (
-    <div className="tip" role="tooltip" style={{ left }}>
+    <div className="tip" role="tooltip" style={{ left: x }}>
       <small>{data.xs[index]}</small>
       {total !== null && <b>{formatValue(data.yType, total)}</b>}
       {rows.length > 1 &&
@@ -130,6 +148,9 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
   const { data, mark } = props;
   const gradient = useId();
   const [hovered, setHovered] = useState<number>();
+  const plot = useRef<HTMLDivElement>(null);
+  const width = useWidth(plot);
+  const right = Math.max(width - rightGap, left + 1);
   const isStacked = mark === "bar" && props.isStacked;
   const tops = isStacked
     ? data.xs.map((_, i) => data.series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0))
@@ -141,21 +162,22 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
     x: (i) => left + band * (i + 0.5),
     y: (v) => bottom - ((v - scale.min) / (scale.max - scale.min)) * (bottom - top),
   };
-  const every = Math.ceil(data.xs.length / 8);
+  const every = Math.ceil(data.xs.length / Math.max(1, Math.floor((right - left) / labelSpace)));
   const showTooltipAt = (event: PointerEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
-    const index = Math.floor((((event.clientX - box.left) / box.width) * 800 - left) / band);
+    const index = Math.floor((event.clientX - box.left - left) / band);
     setHovered(index >= 0 && index < data.xs.length ? index : undefined);
   };
   return (
     <div
+      ref={plot}
       className="plot"
       onPointerMove={showTooltipAt}
       onPointerLeave={() => setHovered(undefined)}
     >
       <svg
         className={hovered === undefined ? "chart" : "chart dim"}
-        viewBox="0 0 800 236"
+        viewBox={`0 0 ${Math.max(width, right + rightGap)} ${height}`}
         role="img"
         aria-label={chartLabel(data, mark, isStacked)}
       >
@@ -212,7 +234,9 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
           ),
         )}
       </svg>
-      {hovered !== undefined && <Tooltip data={data} index={hovered} isStacked={isStacked} />}
+      {hovered !== undefined && (
+        <Tooltip data={data} index={hovered} x={g.x(hovered)} isStacked={isStacked} />
+      )}
     </div>
   );
 }

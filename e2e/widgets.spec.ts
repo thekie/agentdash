@@ -50,6 +50,25 @@ for (const [name, label] of [
   });
 }
 
+/** The font size an axis label is drawn at on screen, after any SVG scaling. */
+const axisLabelSize = (page: Page, name: string) =>
+  widget(page, name)
+    .locator(".chart text")
+    .first()
+    .evaluate((t: SVGTextElement) => {
+      const scale = t.getScreenCTM()?.a ?? 0;
+      return Number.parseFloat(getComputedStyle(t).fontSize) * scale;
+    });
+
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`a chart in columns draws axis labels at full size in ${colorScheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme });
+    await page.goto("/health");
+    expect(await axisLabelSize(page, "Weight")).toBe(12);
+    expect(await axisLabelSize(page, "Weight, half width")).toBe(12);
+  });
+}
+
 test("hovering a stacked bar shows its total and each series", async ({ page }) => {
   await page.goto("/health");
   const chart = widget(page, "Minutes per week");
