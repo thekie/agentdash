@@ -16,30 +16,30 @@ Terms follow `CONTEXT.md`.
 
 ## Colour
 
-Light and dark use the same token names. Dark follows `prefers-color-scheme`; there is no in-app toggle in v1.
+The values live only in `web/styles.css`, as custom properties under `:root` and again for dark under `prefers-color-scheme`. Light and dark use the same token names; there is no in-app toggle in v1.
 
-| Token               | Light                 | Dark                  | Use                                                   |
-| ------------------- | --------------------- | --------------------- | ----------------------------------------------------- |
-| `bg`                | `#EEF0F5`             | `#0D0F14`             | Page ground                                           |
-| `panel`             | `#FFFFFF`             | `#171A21`             | Widgets, sidebar, breadcrumb pills                    |
-| `soft`              | `#F3F4F8`             | `#1F232C`             | Chips, table header, round buttons, "No data yet" box |
-| `track`             | `#EEF0F4`             | `#262B35`             | Progress track                                        |
-| `line`              | `#E8EAF0`             | `#262B35`             | Gridlines, table rows, dashed outlines                |
-| `ink`               | `#12141A`             | `#EEF0F5`             | Text, values                                          |
-| `ink-2`             | `#4B5260`             | `#B9BFCC`             | Secondary text, KPI labels                            |
-| `ink-3`             | `#5F6672`             | `#9097A5`             | Timestamps, axis labels, meta                         |
-| `accent`            | `#4361EE`             | `#7B93FF`             | Links, current nav item text, done checks             |
-| `accent-soft`       | `#ECF0FE`             | `#232B47`             | Current nav item background                           |
-| `note` / `note-ink` | `#E9EEFE` / `#1E2230` | `#1E2540` / `#DDE3F7` | Note Widget                                           |
-| `good` / `good-bg`  | `#0E7A55` / `#E2F5EC` | `#4FD6A0` / `#12332A` | Change in the good direction                          |
-| `bad` / `bad-bg`    | `#C2362F` / `#FDECEB` | `#FF8A80` / `#3A1E1E` | Bad change, overdue, over budget, errors              |
-| `warn`              | `#B7791F`             | `#E9B949`             | Reconnecting                                          |
-| `live`              | `#1BAA7B`             | `#4FD6A0`             | Live dot                                              |
-| `tip` / `tip-ink`   | `#12141A` / `#FFFFFF` | `#F3F4F8` / `#12141A` | Chart tooltip (inverted surface)                      |
+| Token               | Use                                                   |
+| ------------------- | ----------------------------------------------------- |
+| `bg`                | Page ground                                           |
+| `panel`             | Widgets, sidebar, breadcrumb pills                    |
+| `soft`              | Chips, table header, round buttons, "No data yet" box |
+| `track`             | Progress track                                        |
+| `line`              | Gridlines, table rows, dashed outlines                |
+| `ink`               | Text, values                                          |
+| `ink-2`             | Secondary text, KPI labels                            |
+| `ink-3`             | Timestamps, axis labels, meta                         |
+| `accent`            | Links, current nav item text, done checks             |
+| `accent-soft`       | Current nav item background                           |
+| `note` / `note-ink` | Note Widget                                           |
+| `good` / `good-bg`  | Change in the good direction                          |
+| `bad` / `bad-bg`    | Bad change, overdue, over budget, errors              |
+| `warn`              | Reconnecting                                          |
+| `live`              | Live dot                                              |
+| `tip` / `tip-ink`   | Chart tooltip (inverted surface)                      |
 
-**Chart series**, in order: `s1` blue `#4361EE` / `#7B93FF`, `s2` peach `#F2A272` / `#F6AE80`, `s3` mint `#48C9A6` / `#4FD6B4`, `s4` lilac `#B39DF7` / `#BFA9FF`. From the fifth series on, the colours repeat with a second cue: bars get a 45° hatch in `panel` stripes, lines a 7/6 dash, and legend and tooltip swatches the same hatch. Other, the series a chart folds its smallest series into, is grey `s-other` `#9AA1AE` / `#6F7685`. More hues were tried and rejected: past six, two of them fall below a colour-blind separation of ΔE 8 (OKLab).
+**Chart series**, in order: `s1` blue, `s2` peach, `s3` mint, `s4` lilac. From the fifth series on, the colours repeat with a second cue: bars get a 45° hatch in `panel` stripes, lines a 7/6 dash, and legend and tooltip swatches the same hatch. Other, the series a chart folds its smallest series into, is grey `s-other`. More hues were tried and rejected: past six, two of them fall below a colour-blind separation of ΔE 8 (OKLab).
 
-**Tints** (icon tile background / icon stroke), assigned by position on the page, cycling: blue `#ECF0FE`/`#4361EE`, peach `#FFF1E8`/`#D2652A`, mint `#E3F7F1`/`#1B9C78`, lilac `#F2EEFE`/`#8A6BE0`, amber `#FFF6E0`/`#B7791F` (dark: `#232B47`, `#3A2A20`, `#15342D`, `#2C2645`, `#3A3220` with the lifted strokes). KPI and progress icon tiles count one sequence; Dashboard link tiles count another.
+**Tints** (icon tile background / icon stroke), assigned by position on the page, cycling: blue, peach, mint, lilac, amber (`t-blue` / `i-blue` and so on). KPI and progress icon tiles count one sequence; Dashboard link tiles count another.
 
 **Good vs bad** follows `goodDirection`, not the sign: a falling "Spent this month" is green. The arrow always shows the real direction.
 
