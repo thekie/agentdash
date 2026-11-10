@@ -111,15 +111,15 @@ function Tooltip({
   data,
   index,
   x,
-  isStacked,
+  hasTotal,
 }: {
   data: ChartData;
   index: number;
   x: number;
-  isStacked: boolean;
+  hasTotal: boolean;
 }) {
   const rows = data.series.map((s, j) => ({ ...s, value: s.values[index] ?? 0, j }));
-  const total = isStacked || rows.length === 1 ? rows.reduce((sum, r) => sum + r.value, 0) : null;
+  const total = hasTotal || rows.length === 1 ? rows.reduce((sum, r) => sum + r.value, 0) : null;
   return (
     <div className="tip" role="tooltip" style={{ left: x }}>
       <small>{data.xs[index]}</small>
@@ -145,7 +145,12 @@ function chartLabel(data: ChartData, mark: "line" | "bar", isStacked: boolean): 
 }
 
 /** Draws a line or bar chart on one y axis, with a tooltip for the x position under the pointer. */
-export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked: boolean }) {
+export function Chart(props: {
+  data: ChartData;
+  mark: "line" | "bar";
+  isStacked: boolean;
+  hasTotal: boolean;
+}) {
   const { data, mark } = props;
   const gradient = useId();
   const [hovered, setHovered] = useState<number>();
@@ -238,7 +243,7 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
         </svg>
       )}
       {hovered !== undefined && (
-        <Tooltip data={data} index={hovered} x={g.x(hovered)} isStacked={isStacked} />
+        <Tooltip data={data} index={hovered} x={g.x(hovered)} hasTotal={props.hasTotal} />
       )}
     </div>
   );
