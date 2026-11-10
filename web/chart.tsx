@@ -1,6 +1,6 @@
 import { type PointerEvent, type RefObject, useId, useLayoutEffect, useRef, useState } from "react";
 import { formatAxisValue, formatValue } from "./format.ts";
-import { type ChartData, niceScale, smoothPath } from "./widget-data.ts";
+import { type ChartData, niceScale, otherKey, smoothPath } from "./widget-data.ts";
 
 const left = 64;
 const rightGap = 16;
@@ -25,8 +25,21 @@ function useWidth(ref: RefObject<HTMLElement | null>): number {
   return width;
 }
 
-/** Returns the colour of the series at `index`. Four colours repeat. */
-export const seriesColor = (index: number) => `var(--s${(index % 4) + 1})`;
+/** Returns the colour of the series at `index`. Four colours repeat; Other is grey. */
+const seriesColor = (index: number, key = "") =>
+  key === otherKey ? "var(--s-other)" : `var(--s${(index % 4) + 1})`;
+
+/** Whether the series at `index` repeats an earlier colour, so bars hatch and lines dash. */
+const repeats = (index: number, key = "") => index >= 4 && key !== otherKey;
+
+/** Returns the CSS background of a legend or tooltip swatch for the series at `index`. */
+export const seriesSwatch = (index: number, key = "") =>
+  repeats(index, key)
+    ? `repeating-linear-gradient(45deg, ${seriesColor(index)} 0 2.5px, transparent 2.5px 4.5px)`
+    : seriesColor(index, key);
+
+const barFill = (index: number, key: string, hatch: string) =>
+  repeats(index, key) ? `url(#${hatch}-${index % 4})` : seriesColor(index, key);
 
 interface Geometry {
   x: (index: number) => number;
@@ -36,13 +49,14 @@ interface Geometry {
 
 interface BarsProps {
   data: ChartData;
+  hatch: string;
   g: Geometry;
   hovered: number | undefined;
 }
 
 const columnClass = (i: number, hovered: number | undefined) => (i === hovered ? "col on" : "col");
 
-function StackedBars({ data, g, hovered }: BarsProps) {
+function StackedBars({ data, g, hovered, hatch }: BarsProps) {
   const width = Math.min(44, g.band * 0.45);
   return data.xs.map((key, i) => {
     let base = 0;
@@ -60,7 +74,7 @@ function StackedBars({ data, g, hovered }: BarsProps) {
               width={width}
               height={Math.abs(g.y(from) - g.y(base))}
               rx={7}
-              style={{ fill: seriesColor(j) }}
+              style={{ fill: barFill(j, s.key, hatch) }}
             />
           );
         })}
@@ -69,7 +83,7 @@ function StackedBars({ data, g, hovered }: BarsProps) {
   });
 }
 
-function GroupedBars({ data, g, hovered }: BarsProps) {
+function GroupedBars({ data, g, hovered, hatch }: BarsProps) {
   const count = data.series.length;
   const width = Math.min(g.band * 0.6, count * 30);
   return data.xs.map((key, i) => (
@@ -84,7 +98,7 @@ function GroupedBars({ data, g, hovered }: BarsProps) {
             width={Math.max(1, width / count - 3)}
             height={Math.abs(g.y(0) - g.y(value))}
             rx={7}
-            style={{ fill: seriesColor(j) }}
+            style={{ fill: barFill(j, s.key, hatch) }}
           />
         );
       })}
@@ -101,7 +115,11 @@ function Lines({ data, g, gradient }: { data: ChartData; g: Geometry; gradient: 
         {data.series.length === 1 && (
           <path d={`${d} L${last},${bottom} L${g.x(0)},${bottom} Z`} fill={`url(#${gradient})`} />
         )}
-        <path d={d} className="line" style={{ stroke: seriesColor(j) }} />
+        <path
+          d={d}
+          className={repeats(j, s.key) ? "line dash" : "line"}
+          style={{ stroke: seriesColor(j, s.key) }}
+        />
       </g>
     );
   });
@@ -128,8 +146,9 @@ function Tooltip({
         rows.map((r) => (
           <div className="r" key={r.key}>
             <span>
-              <i style={{ background: seriesColor(r.j) }} />
+              <i style={{ background: seriesSwatch(r.j, r.key) }} />
               {r.name}
+              {r.members && <em className="members">{r.members.join(", ")}</em>}
             </span>
             {formatValue(data.yType, r.value)}
           </div>
@@ -193,6 +212,19 @@ export function Chart(props: {
               <stop offset="0" style={{ stopColor: seriesColor(0), stopOpacity: 0.2 }} />
               <stop offset="1" style={{ stopColor: seriesColor(0), stopOpacity: 0 }} />
             </linearGradient>
+            {[0, 1, 2, 3].map((k) => (
+              <pattern
+                key={k}
+                id={`${gradient}-${k}`}
+                width={6}
+                height={6}
+                patternUnits="userSpaceOnUse"
+                patternTransform="rotate(45)"
+              >
+                <rect width={6} height={6} style={{ fill: seriesColor(k) }} />
+                <rect className="hatch" width={2.5} height={6} />
+              </pattern>
+            ))}
           </defs>
           {scale.ticks.map((t) => (
             <g key={t}>
@@ -210,9 +242,9 @@ export function Chart(props: {
           ))}
           {mark === "bar" ? (
             isStacked ? (
-              <StackedBars data={data} g={g} hovered={hovered} />
+              <StackedBars data={data} g={g} hovered={hovered} hatch={gradient} />
             ) : (
-              <GroupedBars data={data} g={g} hovered={hovered} />
+              <GroupedBars data={data} g={g} hovered={hovered} hatch={gradient} />
             )
           ) : (
             <Lines data={data} g={g} gradient={gradient} />
@@ -228,7 +260,7 @@ export function Chart(props: {
                     cx={g.x(hovered)}
                     cy={g.y(s.values[hovered] ?? 0)}
                     r={6}
-                    style={{ stroke: seriesColor(j) }}
+                    style={{ stroke: seriesColor(j, s.key) }}
                   />
                 ))}
             </g>

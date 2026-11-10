@@ -236,6 +236,11 @@ test.for([
     ["widget", "config", "stacked"],
   ],
   [
+    "an Other fold on series that do not add up",
+    { ...chart("amount"), config: { mark: "line", other: 4 } },
+    ["widget", "config", "other"],
+  ],
+  [
     "columns with one child",
     { type: "columns", config: {}, children: [{ type: "note", config: { markdown: "a" } }] },
     ["widget", "children"],

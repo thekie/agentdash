@@ -3,6 +3,7 @@ import type { ColumnType } from "../src/storage/storage.ts";
 import {
   chartData,
   checklistRows,
+  foldOther,
   isOverdue,
   kpiData,
   niceScale,
@@ -66,6 +67,31 @@ test("each y column is one series, named by its label", () => {
     ["run", "Running", [18]],
     ["ride", "ride", [30]],
   ]);
+});
+
+const series = (name: string, values: number[]) => ({ key: name, name, values });
+
+test("folding keeps the largest series in their order and sums the rest into Other", () => {
+  const data = {
+    xs: ["Jun", "Jul"],
+    yType: num,
+    series: [
+      series("Rent", [1200, 1200]),
+      series("Gifts", [60, 0]),
+      series("Groceries", [400, 420]),
+      series("Leisure", [10, 20]),
+    ],
+  };
+  expect(foldOther(data, 2).series).toEqual([
+    series("Rent", [1200, 1200]),
+    series("Groceries", [400, 420]),
+    { key: "\0other", name: "Other", values: [70, 20], members: ["Gifts", "Leisure"] },
+  ]);
+});
+
+test("folding leaves a chart with no more series than it keeps unchanged", () => {
+  const data = { xs: ["Jun"], yType: num, series: [series("Rent", [1]), series("Gifts", [2])] };
+  expect(foldOther(data, 2)).toBe(data);
 });
 
 test.for([

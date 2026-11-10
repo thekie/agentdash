@@ -32,10 +32,22 @@ const Chart = z.strictObject({
         .describe(
           "The series add up, such as km per sport or balances per account, so the tooltip shows their total. Leave it out for prices, weights or rates. Stacked bars always show a total.",
         ),
+      other: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe(
+          "Draws only the `other` series with the largest totals and sums the rest into one grey Other series, such as the four biggest spending categories. Only for series that add up (stacked or additive). Set it at least two below the series count, or Other holds a single series.",
+        ),
     })
     .refine((c) => !c.stacked || c.mark === "bar", {
       message: "only a bar chart can be stacked",
       path: ["stacked"],
+    })
+    .refine((c) => c.other === undefined || c.stacked || c.additive, {
+      message: "only series that add up (stacked or additive) can be folded into Other",
+      path: ["other"],
     }),
   projection: Projection,
 });
