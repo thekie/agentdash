@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type Column, ColumnKey, type ColumnType } from "./columns.ts";
+import { type Column, ColumnKey, ColumnLabel, type ColumnType } from "./columns.ts";
 import type { Database } from "./database.ts";
 import type { Issue, Path } from "./errors.ts";
 import { liveColumns, type StoreRow, storeRow } from "./stores.ts";
@@ -39,8 +39,9 @@ export type Bucket = z.infer<typeof Bucket>;
 const AggregateOp = z.enum(["count", "sum", "avg", "min", "max", "last"]);
 type AggregateOp = z.infer<typeof AggregateOp>;
 
-/** The schema of the header that a Widget shows for an output column. */
-const Label = z.string().min(1).optional();
+const Label = ColumnLabel.optional().describe(
+  "The header a Widget shows for this output column. A column without one shows its Data Store label, else its name.",
+);
 
 /**
  * The schema of a Projection. A column is its key in the `from` Data Store, or `store.key` in a
@@ -340,7 +341,7 @@ function columnType(column: Column): ColumnType {
   return type;
 }
 
-function labelOf(item: { label?: string | undefined }): { label?: string } {
+function ownLabel(item: { label?: string | undefined }): { label?: string } {
   return item.label === undefined ? {} : { label: item.label };
 }
 
@@ -351,11 +352,11 @@ function resolveGroups(r: Resolver, groups: NonNullable<Projection["groupBy"]>):
     if (!ref) return [];
     const name = group.as ?? ref.column.key;
     if (group.bucket === undefined) {
-      return [{ kind: "group", name, ...labelOf(group), type: columnType(ref.column), ref }];
+      return [{ kind: "group", name, ...ownLabel(group), type: columnType(ref.column), ref }];
     }
     addTypeProblem(r, ref, timeTypes, [...path, "column"]);
     const type: ColumnType = { type: "date" };
-    return [{ kind: "group", name, ...labelOf(group), type, ref, bucket: group.bucket }];
+    return [{ kind: "group", name, ...ownLabel(group), type, ref, bucket: group.bucket }];
   });
 }
 
@@ -394,7 +395,7 @@ function resolveAggregates(
     const type: ColumnType =
       op === "count" || !ref ? { type: "number", format: "plain" } : columnType(ref.column);
     const refs = { ...(ref && { ref }), ...(by && { by }) };
-    return { kind: "aggregate", name, ...labelOf(aggregate), type, op, ...refs };
+    return { kind: "aggregate", name, ...ownLabel(aggregate), type, op, ...refs };
   });
 }
 
@@ -413,7 +414,7 @@ function resolveSelect(r: Resolver, projection: Projection): Output[] {
     ];
   }
   const source = r.sources[0];
-  const selected: { column: string; as?: string | undefined; label?: string | undefined }[] =
+  const selected: NonNullable<Projection["select"]> =
     projection.select ??
     (source ? liveColumns(source.store).map((c) => ({ column: c.physical })) : []);
   const form = projection.select ? r.form : "stored";
@@ -424,7 +425,7 @@ function resolveSelect(r: Resolver, projection: Projection): Output[] {
           {
             kind: "column",
             name: item.as ?? ref.column.key,
-            ...labelOf(item),
+            ...ownLabel(item),
             type: columnType(ref.column),
             ref,
           },

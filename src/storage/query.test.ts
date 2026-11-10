@@ -413,19 +413,26 @@ test("a column is labelled by the Projection, else by its Data Store", ({ storag
   ]);
 });
 
+test.for<[NonNullable<ProjectionInput["groupBy"]>[number], string | undefined]>([
+  [{ column: "month" }, "Month"],
+  [{ column: "month", bucket: "year", as: "year" }, undefined],
+  [{ column: "month", bucket: "year", as: "year", label: "Year" }, "Year"],
+])("group %j is labelled %j", ([group, label], { storage }) => {
+  createLabelledBudget(storage);
+  const [column] = storage.query({ from: "spend", groupBy: [group] }).columns;
+  expect(column?.label).toBe(label);
+});
+
 test("an aggregate is labelled only by the Projection", ({ storage }) => {
   createLabelledBudget(storage);
   const result = storage.query({
     from: "spend",
-    groupBy: [{ column: "month", bucket: "year", as: "year", label: "Year" }, { column: "note" }],
     aggregate: [
       { op: "sum", column: "amount" },
       { op: "count", label: "Payments" },
     ],
   });
   expect(result.columns.map(({ name, label }) => [name, label])).toEqual([
-    ["year", "Year"],
-    ["note", undefined],
     ["sum_amount", undefined],
     ["count", "Payments"],
   ]);

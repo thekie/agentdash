@@ -149,7 +149,7 @@ export function compileProjection(p: ResolvedProjection, now: string): Compiled 
 export interface QueryResult {
   /**
    * The output columns. `label` is the header to show: the one the Projection gives, else the Data
-   * Store label of a plain or grouped column.
+   * Store label of a selected column or of a group without a bucket.
    */
   columns: { name: string; label?: string; type: ColumnType }[];
   /** The rows in the form that Agents read, keyed by output column name. */
@@ -158,9 +158,15 @@ export interface QueryResult {
   truncated: boolean;
 }
 
+/** Returns the Data Store label an output column shows. A bucket or an aggregate changes the values. */
+function storeLabel(o: Output): string | undefined {
+  if (o.kind === "aggregate" || (o.kind === "group" && o.bucket)) return undefined;
+  return o.ref.column.label;
+}
+
 function resultColumns(p: ResolvedProjection): QueryResult["columns"] {
   return p.outputs.map((o) => {
-    const label = o.label ?? (o.kind === "aggregate" ? undefined : o.ref.column.label);
+    const label = o.label ?? storeLabel(o);
     return { name: o.name, ...(label !== undefined && { label }), type: o.type };
   });
 }

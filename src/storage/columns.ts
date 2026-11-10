@@ -55,7 +55,10 @@ export type ColumnTypeSpec = z.input<typeof ColumnTypeSpec>;
 /** Describes a column type that `ColumnTypeSpec` has parsed, with its defaults filled in. */
 export type ParsedColumnType = z.output<typeof ColumnTypeSpec>;
 
-const ColumnBase = z.object({ key: ColumnKey, label: z.string().min(1).optional() });
+/** The schema of a column label: the header a Widget shows for the column. */
+export const ColumnLabel = z.string().min(1);
+
+const ColumnBase = z.object({ key: ColumnKey, label: ColumnLabel.optional() });
 
 /** The schema of a column as an Agent writes it: a key, an optional label and a type. */
 export const ColumnSpec = z.intersection(ColumnBase, ColumnTypeSpec);

@@ -35,7 +35,7 @@ function StackedBars({ data, g, hovered }: BarsProps) {
           base += s.values[i] ?? 0;
           return (
             <rect
-              key={s.name}
+              key={s.key}
               className="seg"
               x={g.x(i) - width / 2}
               y={Math.min(g.y(base), g.y(from))}
@@ -60,7 +60,7 @@ function GroupedBars({ data, g, hovered }: BarsProps) {
         const value = s.values[i] ?? 0;
         return (
           <rect
-            key={s.name}
+            key={s.key}
             x={g.x(i) - width / 2 + (j * width) / count + 1.5}
             y={Math.min(g.y(value), g.y(0))}
             width={width / count - 3}
@@ -79,7 +79,7 @@ function Lines({ data, g, gradient }: { data: ChartData; g: Geometry; gradient: 
     const d = smoothPath(s.values.map((v, i) => [g.x(i), g.y(v)]));
     const last = g.x(s.values.length - 1);
     return (
-      <g key={s.name}>
+      <g key={s.key}>
         {data.series.length === 1 && (
           <path d={`${d} L${last},${bottom} L${g.x(0)},${bottom} Z`} fill={`url(#${gradient})`} />
         )}
@@ -98,7 +98,7 @@ function Tooltip({
   index: number;
   isStacked: boolean;
 }) {
-  const rows = data.series.map((s, j) => ({ name: s.name, value: s.values[index] ?? 0, j }));
+  const rows = data.series.map((s, j) => ({ ...s, value: s.values[index] ?? 0, j }));
   const total = isStacked || rows.length === 1 ? rows.reduce((sum, r) => sum + r.value, 0) : null;
   const left = `${((index + 0.5) / data.xs.length) * 100}%`;
   return (
@@ -107,7 +107,7 @@ function Tooltip({
       {total !== null && <b>{formatValue(data.yType, total)}</b>}
       {rows.length > 1 &&
         rows.map((r) => (
-          <div className="r" key={r.name}>
+          <div className="r" key={r.key}>
             <span>
               <i style={{ background: seriesColor(r.j) }} />
               {r.name}
@@ -194,7 +194,7 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
             {mark === "line" &&
               data.series.map((s, j) => (
                 <circle
-                  key={s.name}
+                  key={s.key}
                   className="pt"
                   cx={g.x(hovered)}
                   cy={g.y(s.values[hovered] ?? 0)}

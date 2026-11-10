@@ -7,8 +7,9 @@ export type Result = NonNullable<WidgetView["result"]>;
 /** Describes the Slots of a Projection: each names one output column or a list of them. */
 export type Slots = Record<string, string | string[]>;
 
-/** Describes one line or one bar colour of a chart. */
+/** Describes one line or one bar colour of a chart. `name` is shown and `key` tells series apart. */
 export interface Series {
+  key: string;
   name: string;
   values: number[];
 }
@@ -20,14 +21,15 @@ export interface ChartData {
   yType: ColumnType;
 }
 
-/** Returns the header of the output column `name`: its label, else its name. */
-function labelOf(result: Result, name: string): string {
-  return result.columns.find((c) => c.name === name)?.label ?? name;
-}
+/** Returns the header of an output column: its label, else its name. */
+export const header = (column: Result["columns"][number]) => column.label ?? column.name;
+
+const columnOf = (result: Result, name: string | undefined) =>
+  result.columns.find((c) => c.name === name);
 
 /** Returns the type of the output column `name`. */
 export function columnType(result: Result, name: string | undefined): ColumnType | undefined {
-  return result.columns.find((c) => c.name === name)?.type;
+  return columnOf(result, name)?.type;
 }
 
 function columnsOf(slot: string | string[] | undefined): string[] {
@@ -64,7 +66,8 @@ export function chartData(result: Result, slots: Slots): ChartData {
       xs,
       yType,
       series: ys.map((y) => ({
-        name: labelOf(result, y),
+        key: y,
+        name: columnOf(result, y)?.label ?? y,
         values: keys.map((k) => valueAt(k, result.rows, y)),
       })),
     };
@@ -73,7 +76,7 @@ export function chartData(result: Result, slots: Slots): ChartData {
   const names = [...new Set(result.rows.map((row) => String(row[seriesColumn])))];
   const series = names.map((name) => {
     const rows = result.rows.filter((r) => String(r[seriesColumn]) === name);
-    return { name, values: keys.map((k) => valueAt(k, rows, y)) };
+    return { key: name, name, values: keys.map((k) => valueAt(k, rows, y)) };
   });
   return { xs, yType, series };
 }

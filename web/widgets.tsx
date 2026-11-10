@@ -12,6 +12,7 @@ import {
   chartData,
   checklistRows,
   columnType,
+  header,
   isOverdue,
   kpiData,
   openFirst,
@@ -277,7 +278,7 @@ function Table({ widget, result }: { widget: WidgetOf<"table">; result: Result }
               <tr>
                 {result.columns.map((c) => (
                   <th key={c.name} scope="col" className={isNumeric(c.type) ? "num" : undefined}>
-                    {c.label ?? c.name}
+                    {header(c)}
                   </th>
                 ))}
               </tr>
@@ -455,7 +456,7 @@ function ChartCard({ widget, result }: { widget: WidgetOf<"chart">; result: Resu
         {data.series.length > 1 && (
           <ul className="legend">
             {data.series.map((s, j) => (
-              <li key={s.name}>
+              <li key={s.key}>
                 <i style={{ background: seriesColor(j) }} />
                 {s.name}
               </li>

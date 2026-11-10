@@ -41,12 +41,12 @@ test("a series column splits one y column into one series per value", () => {
   );
   expect(data.xs).toEqual(["W1", "W2"]);
   expect(data.series).toEqual([
-    { name: "Run", values: [90, 0] },
-    { name: "Ride", values: [120, 60] },
+    { key: "Run", name: "Run", values: [90, 0] },
+    { key: "Ride", name: "Ride", values: [120, 60] },
   ]);
 });
 
-test("each y column is one series", () => {
+test("each y column is one series, named by its label", () => {
   const rows = [{ week: "W1", run: 18, ride: 30 }];
   const data = chartData(
     result(
@@ -62,9 +62,9 @@ test("each y column is one series", () => {
       y: ["run", "ride"],
     },
   );
-  expect(data.series.map((s) => [s.name, s.values])).toEqual([
-    ["Running", [18]],
-    ["ride", [30]],
+  expect(data.series.map((s) => [s.key, s.name, s.values])).toEqual([
+    ["run", "Running", [18]],
+    ["ride", "ride", [30]],
   ]);
 });
 
