@@ -15,6 +15,7 @@ How to work:
 - Give a Data Store a Key when its rows have a natural identity. A retried append then cannot add a row twice, and onConflict "update" re-syncs rows.
 - A retried widget_add adds a second Widget. If a call got no reply, call dashboard_get before you add the Widget again.
 - Try a Projection with projection_query before you bind a Widget to it.
+- To fix or Archive a row, take its id and version from rows_list or rows_append.
 - Nothing is deleted. item_archive hides a Dashboard, Widget, Data Store or row, item_restore brings it back, and archive_list shows what is Archived.
 - Every change to an existing item needs expectedVersion, the version you last read. A conflict returns the current state: merge your change into it and retry with its version.
 - Errors carry a code (not_found, invalid, conflict, archived) and the problems with their paths and valid values.

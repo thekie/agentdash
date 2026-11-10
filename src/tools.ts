@@ -299,7 +299,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     name: "store_list",
     title: "List Data Stores",
     description:
-      "Lists every live Data Store with its id, version, columns, Key, row count and the Widgets that read it. Use it to find a Data Store to append rows to or to bind a Widget to. It returns no rows: read them with projection_query.",
+      "Lists every live Data Store with its id, version, columns, Key, row count and the Widgets that read it. Use it to find a Data Store to append rows to or to bind a Widget to. It returns no rows: read them with rows_list or projection_query.",
     effect: "read",
     input: noInput,
     run: () => storage.stores(),
@@ -317,10 +317,24 @@ export function registerTools(server: McpServer, storage: Storage): void {
         : { rows: storage.archivedRows(store), columns: storage.store(store).archivedColumns },
   });
   tool({
+    name: "rows_list",
+    title: "List rows",
+    description:
+      "Lists the live rows of one Data Store, newest first, each with its id, version, timestamps and values. Use it to find the id and version that rows_update and item_archive need. `filter` takes the Projection filter syntax. It returns at most `limit` rows (default 100, max 1,000), and `truncated` is true if there are more.",
+    effect: "read",
+    input: z.strictObject({
+      store: z.string(),
+      filter: Projection.shape.filter,
+      limit: Projection.shape.limit,
+    }),
+    isLargeResult: true,
+    run: (input) => storage.listRows(input),
+  });
+  tool({
     name: "projection_query",
     title: "Query Data Stores",
     description:
-      "Runs a Projection over the Data Stores and returns `{ columns, rows, truncated }`. Use it to read rows, and to try a Projection before you bind a Widget to it. It returns at most `limit` rows (default 100, max 1,000), and `truncated` is true if there are more.",
+      "Runs a Projection over the Data Stores and returns `{ columns, rows, truncated }`. Use it to read joined, grouped or aggregated data, and to try a Projection before you bind a Widget to it. It returns at most `limit` rows (default 100, max 1,000), and `truncated` is true if there are more.",
     effect: "read",
     input: z.strictObject({ projection: Projection }),
     isLargeResult: true,
@@ -429,7 +443,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     name: "rows_append",
     title: "Append rows",
     description:
-      "Appends up to 1,000 rows to a Data Store, all or none, each row an object keyed by column key. If a row's Key matches a live row, `onConflict` decides: error (default), update or skip. Without a Key, a retried call appends the rows again. Returns the ids of the inserted, updated and skipped rows.",
+      "Appends up to 1,000 rows to a Data Store, all or none, each row an object keyed by column key. If a row's Key matches a live row, `onConflict` decides: error (default), update or skip. Without a Key, a retried call appends the rows again. Returns `{ id, version }` of each inserted and updated row, ready for rows_update, and the ids of the skipped rows.",
     effect: "create",
     input: z.strictObject({
       store: z.string(),
@@ -442,7 +456,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     name: "rows_update",
     title: "Update rows",
     description:
-      'Writes the given values of up to 1,000 rows by id, all or none, and keeps the other columns. Row ids come from rows_append. To change a row of a Data Store with a Key, rows_append with onConflict "update" needs no id or version. Returns the rows with their new versions.',
+      'Writes the given values of up to 1,000 rows by id, all or none, and keeps the other columns. Row ids and versions come from rows_list or rows_append. To change a row of a Data Store with a Key, rows_append with onConflict "update" needs no id or version. Returns the rows with their new versions.',
     effect: "overwrite",
     input: z.strictObject({
       store: z.string(),
@@ -474,7 +488,7 @@ export function registerTools(server: McpServer, storage: Storage): void {
     name: "item_archive",
     title: "Archive an item",
     description:
-      "Archives a Dashboard, Widget, Data Store or row, which hides it and everything under it. Nothing is deleted: item_restore brings it back. Returns the Archived item.",
+      "Archives a Dashboard, Widget, Data Store or row, which hides it and everything under it. A row's id and version come from rows_list or rows_append. Nothing is deleted: item_restore brings it back. Returns the Archived item.",
     effect: "reversible",
     input: ItemRef,
     listing: ItemRefListing,
