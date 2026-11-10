@@ -1,6 +1,26 @@
 import { type PointerEvent, useId, useState } from "react";
 import { formatAxisValue, formatValue } from "./format.ts";
+import { prototypeVariant } from "./prototype-tooltip-switcher.tsx";
 import { type ChartData, niceScale, smoothPath } from "./widget-data.ts";
+
+// PROTOTYPE (Which chart tooltips show a total?): stand-in for a chart config flag that says the
+// series add up. Keyed by Widget title because the Widget Catalog has no such field.
+const prototypeAddsUp = new Set(["Spending by category", "Accounts", "Distance per week", "Sleep"]);
+
+/** PROTOTYPE: whether the tooltip shows a total under the `?variant=` being compared. */
+function prototypeShowsTotal(data: ChartData, isStacked: boolean, title: string): boolean {
+  if (isStacked || data.series.length === 1) return true;
+  switch (prototypeVariant()) {
+    case "B":
+      return true;
+    case "C":
+      return prototypeAddsUp.has(title);
+    case "D":
+      return data.yType.type === "money";
+    default:
+      return false;
+  }
+}
 
 const left = 64;
 const right = 784;
@@ -93,13 +113,17 @@ function Tooltip({
   data,
   index,
   isStacked,
+  title,
 }: {
   data: ChartData;
   index: number;
   isStacked: boolean;
+  title: string;
 }) {
   const rows = data.series.map((s, j) => ({ name: s.name, value: s.values[index] ?? 0, j }));
-  const total = isStacked || rows.length === 1 ? rows.reduce((sum, r) => sum + r.value, 0) : null;
+  const total = prototypeShowsTotal(data, isStacked, title)
+    ? rows.reduce((sum, r) => sum + r.value, 0)
+    : null;
   const left = `${((index + 0.5) / data.xs.length) * 100}%`;
   return (
     <div className="tip" role="tooltip" style={{ left }}>
@@ -126,7 +150,12 @@ function chartLabel(data: ChartData, mark: "line" | "bar", isStacked: boolean): 
 }
 
 /** Draws a line or bar chart on one y axis, with a tooltip for the x position under the pointer. */
-export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked: boolean }) {
+export function Chart(props: {
+  data: ChartData;
+  mark: "line" | "bar";
+  isStacked: boolean;
+  title: string;
+}) {
   const { data, mark } = props;
   const gradient = useId();
   const [hovered, setHovered] = useState<number>();
@@ -212,7 +241,9 @@ export function Chart(props: { data: ChartData; mark: "line" | "bar"; isStacked:
           ),
         )}
       </svg>
-      {hovered !== undefined && <Tooltip data={data} index={hovered} isStacked={isStacked} />}
+      {hovered !== undefined && (
+        <Tooltip data={data} index={hovered} isStacked={isStacked} title={props.title} />
+      )}
     </div>
   );
 }

@@ -17,7 +17,8 @@
     "test": "vitest",
     "e2e": "vite build && playwright test",
     "verify": "npm run check && npm run e2e",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "prototype:tooltip": "vite build && rm -rf .data/prototype-tooltip && node e2e/prototype-tooltip-seed.ts .data/prototype-tooltip && node src/main.ts --port 4410 --data-dir .data/prototype-tooltip"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",

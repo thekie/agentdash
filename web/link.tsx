@@ -2,7 +2,7 @@ import type { CSSProperties, MouseEvent, ReactNode } from "react";
 
 /** Opens the Dashboard at `path` without reloading the page. */
 export function navigate(path: string, options: { replace?: boolean } = {}) {
-  history[options.replace ? "replaceState" : "pushState"](null, "", `/${path}`);
+  history[options.replace ? "replaceState" : "pushState"](null, "", `/${path}${location.search}`); // PROTOTYPE: keeps ?variant= across navigation
   dispatchEvent(new PopStateEvent("popstate"));
 }
 

@@ -466,7 +466,12 @@ function ChartCard({ widget, result }: { widget: WidgetOf<"chart">; result: Resu
       {data.xs.length === 0 ? (
         <NoData />
       ) : (
-        <Chart data={data} mark={widget.config.mark} isStacked={widget.config.stacked ?? false} />
+        <Chart
+          data={data}
+          mark={widget.config.mark}
+          isStacked={widget.config.stacked ?? false}
+          title={widget.title ?? ""}
+        />
       )}
     </Card>
   );
