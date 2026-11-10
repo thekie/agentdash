@@ -13,8 +13,11 @@ import {
 
 const text: ColumnType = { type: "text" };
 const num: ColumnType = { type: "number", format: "plain" };
-const result = (columns: [string, ColumnType][], rows: Record<string, unknown>[]) => ({
-  columns: columns.map(([name, type]) => ({ name, type })),
+const result = (
+  columns: ([string, ColumnType] | [string, ColumnType, string])[],
+  rows: Record<string, unknown>[],
+) => ({
+  columns: columns.map(([name, type, label]) => ({ name, type, ...(label && { label }) })),
   rows,
   truncated: false,
 });
@@ -38,18 +41,18 @@ test("a series column splits one y column into one series per value", () => {
   );
   expect(data.xs).toEqual(["W1", "W2"]);
   expect(data.series).toEqual([
-    { name: "Run", values: [90, 0] },
-    { name: "Ride", values: [120, 60] },
+    { key: "Run", name: "Run", values: [90, 0] },
+    { key: "Ride", name: "Ride", values: [120, 60] },
   ]);
 });
 
-test("each y column is one series", () => {
+test("each y column is one series, named by its label", () => {
   const rows = [{ week: "W1", run: 18, ride: 30 }];
   const data = chartData(
     result(
       [
         ["week", text],
-        ["run", num],
+        ["run", num, "Running"],
         ["ride", num],
       ],
       rows,
@@ -59,9 +62,9 @@ test("each y column is one series", () => {
       y: ["run", "ride"],
     },
   );
-  expect(data.series.map((s) => [s.name, s.values])).toEqual([
-    ["run", [18]],
-    ["ride", [30]],
+  expect(data.series.map((s) => [s.key, s.name, s.values])).toEqual([
+    ["run", "Running", [18]],
+    ["ride", "ride", [30]],
   ]);
 });
 

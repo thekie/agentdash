@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type Column, ColumnKey, type ColumnType } from "./columns.ts";
+import { type Column, ColumnKey, ColumnLabel, type ColumnType } from "./columns.ts";
 import type { Database } from "./database.ts";
 import type { Issue, Path } from "./errors.ts";
 import { liveColumns, type StoreRow, storeRow } from "./stores.ts";
@@ -39,6 +39,10 @@ export type Bucket = z.infer<typeof Bucket>;
 const AggregateOp = z.enum(["count", "sum", "avg", "min", "max", "last"]);
 type AggregateOp = z.infer<typeof AggregateOp>;
 
+const Label = ColumnLabel.optional().describe(
+  "The header a Widget shows for this output column. A column without one shows its Data Store label, else its name.",
+);
+
 /**
  * The schema of a Projection. A column is its key in the `from` Data Store, or `store.key` in a
  * joined one. `sort` and `slots` name output columns.
@@ -54,11 +58,18 @@ export const Projection = z.strictObject({
       }),
     )
     .optional(),
-  select: z.array(z.strictObject({ column: z.string(), as: ColumnKey.optional() })).optional(),
+  select: z
+    .array(z.strictObject({ column: z.string(), as: ColumnKey.optional(), label: Label }))
+    .optional(),
   filter: z.array(Filter).optional(),
   groupBy: z
     .array(
-      z.strictObject({ column: z.string(), bucket: Bucket.optional(), as: ColumnKey.optional() }),
+      z.strictObject({
+        column: z.string(),
+        bucket: Bucket.optional(),
+        as: ColumnKey.optional(),
+        label: Label,
+      }),
     )
     .optional(),
   aggregate: z
@@ -68,6 +79,7 @@ export const Projection = z.strictObject({
         column: z.string().optional(),
         by: z.string().optional(),
         as: ColumnKey.optional(),
+        label: Label,
       }),
     )
     .optional(),
@@ -105,8 +117,8 @@ export type ResolvedFilter =
   | { ref: Ref; op: "in"; values: StoredValue[] }
   | { ref: Ref; op: "empty" | "notEmpty" };
 
-/** Describes a column of the result of a Projection. */
-export type Output = { name: string; type: ColumnType } & (
+/** Describes a column of the result of a Projection. `label` is the one the Projection gives it. */
+export type Output = { name: string; label?: string; type: ColumnType } & (
   | { kind: "column"; ref: Ref }
   | { kind: "group"; ref: Ref; bucket?: Bucket }
   | { kind: "aggregate"; op: AggregateOp; ref?: Ref; by?: Ref }
@@ -329,6 +341,10 @@ function columnType(column: Column): ColumnType {
   return type;
 }
 
+function ownLabel(item: { label?: string | undefined }): { label?: string } {
+  return item.label === undefined ? {} : { label: item.label };
+}
+
 function resolveGroups(r: Resolver, groups: NonNullable<Projection["groupBy"]>): Output[] {
   return groups.flatMap((group, index) => {
     const path = ["groupBy", index];
@@ -336,10 +352,11 @@ function resolveGroups(r: Resolver, groups: NonNullable<Projection["groupBy"]>):
     if (!ref) return [];
     const name = group.as ?? ref.column.key;
     if (group.bucket === undefined) {
-      return [{ kind: "group", name, type: columnType(ref.column), ref }];
+      return [{ kind: "group", name, ...ownLabel(group), type: columnType(ref.column), ref }];
     }
     addTypeProblem(r, ref, timeTypes, [...path, "column"]);
-    return [{ kind: "group", name, type: { type: "date" }, ref, bucket: group.bucket }];
+    const type: ColumnType = { type: "date" };
+    return [{ kind: "group", name, ...ownLabel(group), type, ref, bucket: group.bucket }];
   });
 }
 
@@ -377,7 +394,8 @@ function resolveAggregates(
     const name = aggregate.as ?? (ref ? `${op}_${ref.column.key}` : op);
     const type: ColumnType =
       op === "count" || !ref ? { type: "number", format: "plain" } : columnType(ref.column);
-    return { kind: "aggregate", name, type, op, ...(ref && { ref }), ...(by && { by }) };
+    const refs = { ...(ref && { ref }), ...(by && { by }) };
+    return { kind: "aggregate", name, ...ownLabel(aggregate), type, op, ...refs };
   });
 }
 
@@ -396,14 +414,22 @@ function resolveSelect(r: Resolver, projection: Projection): Output[] {
     ];
   }
   const source = r.sources[0];
-  const selected: { column: string; as?: string | undefined }[] =
+  const selected: NonNullable<Projection["select"]> =
     projection.select ??
     (source ? liveColumns(source.store).map((c) => ({ column: c.physical })) : []);
   const form = projection.select ? r.form : "stored";
   return selected.flatMap((item, index) => {
     const ref = resolveRef({ ...r, form }, item.column, ["select", index, "column"]);
     return ref
-      ? [{ kind: "column", name: item.as ?? ref.column.key, type: columnType(ref.column), ref }]
+      ? [
+          {
+            kind: "column",
+            name: item.as ?? ref.column.key,
+            ...ownLabel(item),
+            type: columnType(ref.column),
+            ref,
+          },
+        ]
       : [];
   });
 }
@@ -487,11 +513,22 @@ function outputIn(form: ProjectionForm, p: ResolvedProjection, output: Output) {
   const ref = (r: Ref | undefined) => r && refIn(form, p, r);
   switch (output.kind) {
     case "column":
-      return { column: ref(output.ref), as: output.name };
+      return { column: ref(output.ref), as: output.name, label: output.label };
     case "group":
-      return { column: ref(output.ref), bucket: output.bucket, as: output.name };
+      return {
+        column: ref(output.ref),
+        bucket: output.bucket,
+        as: output.name,
+        label: output.label,
+      };
     case "aggregate":
-      return { op: output.op, column: ref(output.ref), by: ref(output.by), as: output.name };
+      return {
+        op: output.op,
+        column: ref(output.ref),
+        by: ref(output.by),
+        as: output.name,
+        label: output.label,
+      };
   }
 }
 

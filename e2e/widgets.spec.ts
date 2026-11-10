@@ -28,10 +28,10 @@ test("a labelled progress row over its target says how far, coloured by goodDire
   await expect(over).toHaveClass(/bad/);
 });
 
-test("a table shows the projected columns with formatted values", async ({ page }) => {
+test("a table heads its columns with their labels and formats their values", async ({ page }) => {
   await page.goto("/finance/savings");
   const table = widget(page, "Categories").getByRole("table");
-  await expect(table.getByRole("columnheader")).toHaveText(["name", "spent", "limit"]);
+  await expect(table.getByRole("columnheader")).toHaveText(["name", "Spent", "Monthly limit"]);
   await expect(table.getByRole("row").nth(2).getByRole("cell")).toHaveText([
     "Leisure",
     "€270",
@@ -42,7 +42,7 @@ test("a table shows the projected columns with formatted values", async ({ page 
 for (const [name, label] of [
   ["Weight", "Line chart of kg, 4 Oct to 18 Oct"],
   ["Minutes per week", "Stacked bar chart of Run, Ride, W41 to W42"],
-  ["Distance per week", "Bar chart of run, ride, W41 to W42"],
+  ["Distance per week", "Bar chart of Running, Cycling, W41 to W42"],
 ] as const) {
   test(`the ${name} chart draws as a ${label}`, async ({ page }) => {
     await page.goto("/health");

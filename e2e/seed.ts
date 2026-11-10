@@ -84,8 +84,8 @@ storage.createStore({
   name: "categories",
   columns: [
     { key: "name", type: "text" },
-    { key: "spent", type: "money", currency: "EUR" },
-    { key: "limit", type: "money", currency: "EUR" },
+    { key: "spent", label: "Spent", type: "money", currency: "EUR" },
+    { key: "limit", label: "Monthly limit", type: "money", currency: "EUR" },
   ],
 });
 storage.appendRows({
@@ -174,8 +174,8 @@ storage.createStore({
   name: "distance",
   columns: [
     { key: "week", type: "text" },
-    { key: "run", type: "number", unit: "km" },
-    { key: "ride", type: "number", unit: "km" },
+    { key: "run", label: "Running", type: "number", unit: "km" },
+    { key: "ride", label: "Cycling", type: "number", unit: "km" },
   ],
 });
 storage.appendRows({

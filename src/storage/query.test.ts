@@ -382,3 +382,58 @@ test("a Projection of the wrong shape is invalid with its path", ({ storage }) =
   expect(failure.code).toBe("invalid");
   expect(failure.details.issues).toMatchObject([{ path: ["limit"] }]);
 });
+
+function createLabelledBudget(storage: Storage) {
+  storage.createStore({
+    name: "spend",
+    columns: [
+      { key: "month", label: "Month", type: "date" },
+      { key: "amount", label: "Amount", type: "money", currency: "EUR" },
+      { key: "note", type: "text" },
+    ],
+  });
+}
+
+test("a column is labelled by the Projection, else by its Data Store", ({ storage }) => {
+  createLabelledBudget(storage);
+  const result = storage.query({
+    from: "spend",
+    select: [
+      { column: "month" },
+      { column: "amount", as: "spent" },
+      { column: "note", label: "Note" },
+      { column: "amount", as: "raw", label: "Amount (EUR)" },
+    ],
+  });
+  expect(result.columns.map(({ name, label }) => [name, label])).toEqual([
+    ["month", "Month"],
+    ["spent", "Amount"],
+    ["note", "Note"],
+    ["raw", "Amount (EUR)"],
+  ]);
+});
+
+test.for<[NonNullable<ProjectionInput["groupBy"]>[number], string | undefined]>([
+  [{ column: "month" }, "Month"],
+  [{ column: "month", bucket: "year", as: "year" }, undefined],
+  [{ column: "month", bucket: "year", as: "year", label: "Year" }, "Year"],
+])("group %j is labelled %j", ([group, label], { storage }) => {
+  createLabelledBudget(storage);
+  const [column] = storage.query({ from: "spend", groupBy: [group] }).columns;
+  expect(column?.label).toBe(label);
+});
+
+test("an aggregate is labelled only by the Projection", ({ storage }) => {
+  createLabelledBudget(storage);
+  const result = storage.query({
+    from: "spend",
+    aggregate: [
+      { op: "sum", column: "amount" },
+      { op: "count", label: "Payments" },
+    ],
+  });
+  expect(result.columns.map(({ name, label }) => [name, label])).toEqual([
+    ["sum_amount", undefined],
+    ["count", "Payments"],
+  ]);
+});
