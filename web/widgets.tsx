@@ -277,7 +277,7 @@ function Table({ widget, result }: { widget: WidgetOf<"table">; result: Result }
               <tr>
                 {result.columns.map((c) => (
                   <th key={c.name} scope="col" className={isNumeric(c.type) ? "num" : undefined}>
-                    {c.name}
+                    {c.label ?? c.name}
                   </th>
                 ))}
               </tr>

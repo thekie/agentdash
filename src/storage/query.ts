@@ -147,11 +147,22 @@ export function compileProjection(p: ResolvedProjection, now: string): Compiled 
 
 /** Describes the result of a Projection. */
 export interface QueryResult {
-  columns: { name: string; type: ColumnType }[];
+  /**
+   * The output columns. `label` is the header to show: the one the Projection gives, else the Data
+   * Store label of a plain or grouped column.
+   */
+  columns: { name: string; label?: string; type: ColumnType }[];
   /** The rows in the form that Agents read, keyed by output column name. */
   rows: Record<string, unknown>[];
   /** Is true if the Data Stores hold more rows than the limit. */
   truncated: boolean;
+}
+
+function resultColumns(p: ResolvedProjection): QueryResult["columns"] {
+  return p.outputs.map((o) => {
+    const label = o.label ?? (o.kind === "aggregate" ? undefined : o.ref.column.label);
+    return { name: o.name, ...(label !== undefined && { label }), type: o.type };
+  });
 }
 
 /**
@@ -166,7 +177,7 @@ export function projectionColumns(
   const issues: Issue[] = [];
   const projection = resolveReadableProjection(db, input, path, issues);
   if (!projection) return { issues };
-  return { columns: projection.outputs.map(({ name, type }) => ({ name, type })) };
+  return { columns: resultColumns(projection) };
 }
 
 /**
@@ -184,7 +195,7 @@ export function queryProjection(db: Database, input: ProjectionInput, now: strin
       projection.outputs.map((o) => [o.name, formatValue(o.type, StoredValue.parse(row[o.name]))]),
     );
   return {
-    columns: projection.outputs.map(({ name, type }) => ({ name, type })),
+    columns: resultColumns(projection),
     rows: rows.slice(0, projection.limit).map(format),
     truncated: rows.length > projection.limit,
   };

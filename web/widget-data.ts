@@ -20,6 +20,11 @@ export interface ChartData {
   yType: ColumnType;
 }
 
+/** Returns the header of the output column `name`: its label, else its name. */
+function labelOf(result: Result, name: string): string {
+  return result.columns.find((c) => c.name === name)?.label ?? name;
+}
+
 /** Returns the type of the output column `name`. */
 export function columnType(result: Result, name: string | undefined): ColumnType | undefined {
   return result.columns.find((c) => c.name === name)?.type;
@@ -58,7 +63,10 @@ export function chartData(result: Result, slots: Slots): ChartData {
     return {
       xs,
       yType,
-      series: ys.map((y) => ({ name: y, values: keys.map((k) => valueAt(k, result.rows, y)) })),
+      series: ys.map((y) => ({
+        name: labelOf(result, y),
+        values: keys.map((k) => valueAt(k, result.rows, y)),
+      })),
     };
   }
   const y = ys[0] ?? "";

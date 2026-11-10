@@ -13,8 +13,11 @@ import {
 
 const text: ColumnType = { type: "text" };
 const num: ColumnType = { type: "number", format: "plain" };
-const result = (columns: [string, ColumnType][], rows: Record<string, unknown>[]) => ({
-  columns: columns.map(([name, type]) => ({ name, type })),
+const result = (
+  columns: ([string, ColumnType] | [string, ColumnType, string])[],
+  rows: Record<string, unknown>[],
+) => ({
+  columns: columns.map(([name, type, label]) => ({ name, type, ...(label && { label }) })),
   rows,
   truncated: false,
 });
@@ -49,7 +52,7 @@ test("each y column is one series", () => {
     result(
       [
         ["week", text],
-        ["run", num],
+        ["run", num, "Running"],
         ["ride", num],
       ],
       rows,
@@ -60,7 +63,7 @@ test("each y column is one series", () => {
     },
   );
   expect(data.series.map((s) => [s.name, s.values])).toEqual([
-    ["run", [18]],
+    ["Running", [18]],
     ["ride", [30]],
   ]);
 });

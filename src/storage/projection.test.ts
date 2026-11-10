@@ -231,3 +231,25 @@ test("a Widget without select is broken when a Slot names an Archived column", (
     reason: 'unknown output column "n"',
   });
 });
+
+test("a Widget keeps the labels its Projection gives", ({ storage }) => {
+  createWeightChart(storage);
+  const widget = storage.addWidget({
+    parent: { dashboard: "health" },
+    widget: {
+      type: "table",
+      config: {},
+      projection: {
+        from: "weight_log",
+        groupBy: [{ column: "day", bucket: "month", as: "month", label: "Month" }],
+        aggregate: [{ op: "avg", column: "kg", label: "Average" }],
+      },
+    },
+  });
+  const [, table] = storage.dashboard("health").widgets;
+  expect(table?.id).toBe(widget.id);
+  expect(table?.projection).toMatchObject({
+    groupBy: [{ label: "Month" }],
+    aggregate: [{ label: "Average" }],
+  });
+});
