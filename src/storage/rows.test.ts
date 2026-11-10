@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { failureOf, test } from "./fixture.ts";
-import type { Storage } from "./storage.ts";
+import { createStorage, type Storage } from "./storage.ts";
 
 function createBudget(storage: Storage) {
   storage.createStore({
@@ -90,9 +90,27 @@ test("onConflict update re-syncs matching rows, so repeating the append changes 
     onConflict: "update" as const,
     rows: [{ month: "2026-01-01", category: "rent", amount: 950 }],
   };
-  expect(storage.appendRows(sync)).toEqual({ inserted: [], updated: [1], skipped: [] });
+  expect(storage.appendRows(sync)).toEqual({
+    inserted: [],
+    updated: [{ id: 1, version: 2 }],
+    skipped: [],
+  });
   storage.appendRows(sync);
   expect(storage.rows("budget").map((r) => r.values.amount)).toEqual([950]);
+});
+
+test("an append that updates its own inserted row reports it once at its latest version", ({
+  storage,
+}) => {
+  createBudget(storage);
+  const row = { month: "2026-01-01", category: "rent" };
+  const result = storage.appendRows({
+    store: "budget",
+    onConflict: "update",
+    rows: [row, { ...row, amount: 1 }, { ...row, amount: 2 }],
+  });
+  expect(result).toEqual({ inserted: [{ id: 1, version: 3 }], updated: [], skipped: [] });
+  expect(storage.rows("budget")).toMatchObject([{ id: 1, version: 3 }]);
 });
 
 test("onConflict skip keeps matching rows and appends the rest", ({ storage }) => {
@@ -109,7 +127,7 @@ test("onConflict skip keeps matching rows and appends the rest", ({ storage }) =
       { month: "2026-01-01", category: "food", amount: 300 },
     ],
   });
-  expect(result).toEqual({ inserted: [2], updated: [], skipped: [1] });
+  expect(result).toEqual({ inserted: [{ id: 2, version: 1 }], updated: [], skipped: [1] });
   expect(storage.rows("budget").map((r) => r.values.amount)).toEqual([900, 300]);
 });
 
@@ -214,4 +232,68 @@ test("two rows of one append sharing a Key fail with conflict naming the earlier
   const row = { month: "2026-01-01", category: "rent" };
   const failure = failureOf(() => storage.appendRows({ store: "budget", rows: [row, row] }));
   expect(failure.details.current).toEqual([{ index: 1, sameKeyAsIndex: 0 }]);
+});
+
+function appendMonths(storage: Storage) {
+  createBudget(storage);
+  storage.appendRows({
+    store: "budget",
+    rows: ["2026-08-01", "2026-09-01", "2026-10-01"].map((month) => ({
+      month,
+      category: "rent",
+      amount: 900,
+    })),
+  });
+}
+
+test("listing rows returns live rows newest first with ids and versions", ({ storage }) => {
+  appendMonths(storage);
+  storage.archiveRow({ store: "budget", id: 2, expectedVersion: 1 });
+  expect(storage.listRows({ store: "budget" })).toEqual({
+    rows: [3, 1].map((id) => ({
+      id,
+      version: 1,
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+      values: expect.objectContaining({ category: "rent", amount: 900 }),
+    })),
+    truncated: false,
+  });
+});
+
+test("listing rows applies a filter with a relative date", () => {
+  const storage = createStorage(":memory:", { now: () => "2026-11-10T12:00:00.000Z" });
+  appendMonths(storage);
+  const filter = [{ column: "month", op: ">=" as const, value: { relative: "-10w" } }];
+  const { rows } = storage.listRows({ store: "budget", filter });
+  expect(rows.map((r) => r.values.month)).toEqual(["2026-10-01", "2026-09-01"]);
+  storage.close();
+});
+
+test("listing rows applies an equality filter", ({ storage }) => {
+  appendMonths(storage);
+  const filter = [{ column: "month", op: "=" as const, value: "2026-09-01" }];
+  expect(storage.listRows({ store: "budget", filter }).rows.map((r) => r.id)).toEqual([2]);
+});
+
+test("listing rows stops at the limit and reports truncated", ({ storage }) => {
+  appendMonths(storage);
+  const result = storage.listRows({ store: "budget", limit: 2 });
+  expect(result.rows.map((r) => r.id)).toEqual([3, 2]);
+  expect(result.truncated).toBe(true);
+  expect(storage.listRows({ store: "budget", limit: 3 }).truncated).toBe(false);
+});
+
+test("a filter on an unknown column fails with invalid at its path", ({ storage }) => {
+  createBudget(storage);
+  const filter = [{ column: "colour", op: "empty" as const }];
+  const failure = failureOf(() => storage.listRows({ store: "budget", filter }));
+  expect(failure.code).toBe("invalid");
+  expect(failure.details.issues?.[0]?.path).toEqual(["filter", 0, "column"]);
+});
+
+test("listing the rows of an Archived Data Store fails with archived", ({ storage }) => {
+  createBudget(storage);
+  const { id } = storage.archiveStore({ id: "budget", expectedVersion: 1 });
+  expect(failureOf(() => storage.listRows({ store: id })).code).toBe("archived");
 });

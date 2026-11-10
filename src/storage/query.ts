@@ -76,7 +76,8 @@ function fromSql(p: ResolvedProjection): string {
     .join(" ");
 }
 
-function whereSql(p: ResolvedProjection, now: string, params: SQLInputValue[]): string {
+/** Returns the WHERE clause that keeps the live rows of `from` that pass the filters. */
+export function whereSql(p: ResolvedProjection, now: string, params: SQLInputValue[]): string {
   const filters = p.filters.map((f) => filterSql(f, now, params));
   return ["t0.archivedAt IS NULL", ...filters].join(" AND ");
 }

@@ -2,7 +2,16 @@ import { type Database, openDatabase } from "./database.ts";
 import type { Path } from "./errors.ts";
 import type { ProjectionInput } from "./projection.ts";
 import { projectionColumns, queryProjection } from "./query.ts";
-import { appendRows, archivedRows, archiveRow, liveRows, restoreRow, updateRows } from "./rows.ts";
+import {
+  appendRows,
+  archivedRows,
+  archiveRow,
+  type ListRowsInput,
+  listRows,
+  liveRows,
+  restoreRow,
+  updateRows,
+} from "./rows.ts";
 import {
   alterStore,
   archivedStores,
@@ -83,6 +92,7 @@ export function createStorage(path: string, options: StorageOptions = {}) {
     restoreStore: write(restoreStore),
 
     rows: (store: string) => liveRows(db, store),
+    listRows: (input: ListRowsInput) => listRows(db, input, now()),
     archivedRows: (store: string) => archivedRows(db, store),
     appendRows: write(appendRows),
     updateRows: write(updateRows),

@@ -95,9 +95,9 @@ test("the server sends the primer when an Agent connects", ({ agent }) => {
   expect(agent.client.getInstructions()).toBe(instructions);
 });
 
-test("the server lists 16 tools whose input schemas are objects", async ({ agent }) => {
+test("the server lists 17 tools whose input schemas are objects", async ({ agent }) => {
   const { tools } = await agent.client.listTools();
-  expect(tools.map((t) => t.inputSchema.type)).toEqual(Array(16).fill("object"));
+  expect(tools.map((t) => t.inputSchema.type)).toEqual(Array(17).fill("object"));
 });
 
 test("every tool has a title", async ({ agent }) => {
@@ -142,7 +142,11 @@ test("only the tools that create items are not idempotent", async ({ agent }) =>
 test("the large reads may return up to 500,000 characters inline", async ({ agent }) => {
   const { tools } = await agent.client.listTools();
   const large = tools.filter((t) => t._meta?.["anthropic/maxResultSizeChars"] === 500_000);
-  expect(large.map((t) => t.name).sort()).toEqual(["dashboard_get", "projection_query"]);
+  expect(large.map((t) => t.name).sort()).toEqual([
+    "dashboard_get",
+    "projection_query",
+    "rows_list",
+  ]);
 });
 
 test("the widget_add schema names every Widget type", async ({ agent }) => {
@@ -573,6 +577,36 @@ test("rows_update writes values at the expected version", async ({ agent }) => {
     rows: [{ id: 2, expectedVersion: 1, values: { amount: 950 } }],
   });
   expect(result.body).toMatchObject([{ id: 2, version: 2, values: { amount: 950 } }]);
+});
+
+test("an Agent fixes and Archives a row with the id and version from rows_list", async ({
+  agent,
+}) => {
+  await seedFinance(agent);
+  const appended = await agent.call("rows_append", {
+    store: "expenses",
+    rows: [{ date: "2026-10-03", category: "Books", amount: 12 }],
+  });
+  expect(appended.body.inserted).toEqual([{ id: 3, version: 1 }]);
+  const listed = await agent.call("rows_list", {
+    store: "expenses",
+    filter: [{ column: "category", op: "=", value: "Books" }],
+  });
+  const [row] = listed.body.rows;
+  expect(row).toMatchObject({ id: 3, version: 1, values: { amount: 12 } });
+  const updated = await agent.call("rows_update", {
+    store: "expenses",
+    rows: [{ id: row.id, expectedVersion: row.version, values: { amount: 15 } }],
+  });
+  const archived = await agent.call("item_archive", {
+    kind: "row",
+    store: "expenses",
+    id: row.id,
+    expectedVersion: updated.body[0].version,
+  });
+  expect(archived.body).toMatchObject({ id: 3, version: 3, values: { amount: 15 } });
+  const live = await agent.call("rows_list", { store: "expenses" });
+  expect(live.body).toMatchObject({ rows: [{ id: 2 }, { id: 1 }], truncated: false });
 });
 
 test("an unknown Dashboard fails with not_found and no issues", async ({ agent }) => {

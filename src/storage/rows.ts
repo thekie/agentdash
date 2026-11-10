@@ -1,7 +1,10 @@
+import type { SQLInputValue } from "node:sqlite";
 import { z } from "zod";
 import type { Column } from "./columns.ts";
 import { type Database, quoteId } from "./database.ts";
 import { assertNoIssues, assertVersion, type Issue, type Path, StorageError } from "./errors.ts";
+import { type ProjectionInput, resolveReadableProjection } from "./projection.ts";
+import { whereSql } from "./query.ts";
 import { assertStoreLive, findStore, liveColumns, type StoreRow, tableOf } from "./stores.ts";
 import { formatValue, parseValue, type StoredValue } from "./values.ts";
 
@@ -135,9 +138,15 @@ interface AppendRowsInput {
   onConflict?: OnConflict | undefined;
 }
 
+/** Names a row and the version that `rows_update` and row archive expect. */
+interface RowVersion {
+  id: number;
+  version: number;
+}
+
 interface AppendResult {
-  inserted: number[];
-  updated: number[];
+  inserted: RowVersion[];
+  updated: RowVersion[];
   skipped: number[];
 }
 
@@ -157,11 +166,13 @@ export function appendRows(db: Database, input: AppendRowsInput, now: string): A
   const result: AppendResult = { inserted: [], updated: [], skipped: [] };
   const conflicts: KeyConflict[] = [];
   const insertedBy = new Map<number, number>();
+  const written = new Map<number, RowVersion>();
   for (const [index, values] of parsed.entries()) {
     const outcome = appendOne(db, store, values, input.onConflict ?? "error", now);
     if ("match" in outcome) conflicts.push(keyConflict(index, outcome.match, insertedBy));
-    else result[outcome.list].push(outcome.id);
-    if ("list" in outcome && outcome.list === "inserted") insertedBy.set(outcome.id, index);
+    else if ("skipped" in outcome) result.skipped.push(outcome.skipped);
+    else reportWrite(result, written, outcome);
+    if ("list" in outcome && outcome.list === "inserted") insertedBy.set(outcome.row.id, index);
   }
   if (conflicts.length > 0) {
     throw new StorageError("conflict", `${conflicts.length} rows share a Key with another row`, {
@@ -170,6 +181,24 @@ export function appendRows(db: Database, input: AppendRowsInput, now: string): A
     });
   }
   return result;
+}
+
+/**
+ * Adds a written row to the result. A row that an earlier row of the same append wrote keeps its
+ * first entry, with the latest version.
+ */
+function reportWrite(
+  result: AppendResult,
+  written: Map<number, RowVersion>,
+  outcome: { list: "inserted" | "updated"; row: RowVersion },
+): void {
+  const earlier = written.get(outcome.row.id);
+  if (earlier) {
+    earlier.version = outcome.row.version;
+    return;
+  }
+  result[outcome.list].push(outcome.row);
+  written.set(outcome.row.id, outcome.row);
 }
 
 /**
@@ -182,7 +211,10 @@ function keyConflict(index: number, match: Row, insertedBy: Map<number, number>)
   return earlier === undefined ? { index, row: match } : { index, sameKeyAsIndex: earlier };
 }
 
-type AppendOutcome = { list: keyof AppendResult; id: number } | { match: Row };
+type AppendOutcome =
+  | { list: "inserted" | "updated"; row: RowVersion }
+  | { skipped: number }
+  | { match: Row };
 
 function appendOne(
   db: Database,
@@ -192,11 +224,12 @@ function appendOne(
   now: string,
 ): AppendOutcome {
   const match = findByKey(db, store, values);
-  if (!match) return { list: "inserted", id: insertRow(db, store, values, now) };
-  if (onConflict === "skip") return { list: "skipped", id: match.id };
+  if (!match)
+    return { list: "inserted", row: { id: insertRow(db, store, values, now), version: 1 } };
+  if (onConflict === "skip") return { skipped: match.id };
   if (onConflict === "error") return { match: toRow(store, match) };
   writeValues(db, store, match.id, values, now);
-  return { list: "updated", id: match.id };
+  return { list: "updated", row: { id: match.id, version: match.version + 1 } };
 }
 
 function assertKeyFree(db: Database, store: StoreRow, record: RowRecord, path: Path): void {
@@ -313,4 +346,41 @@ export function liveRows(db: Database, ref: string): Row[] {
 /** Returns the Archived rows of a Data Store, found by id or name, in insertion order. */
 export function archivedRows(db: Database, ref: string): Row[] {
   return rowsWhere(db, ref, "IS NOT NULL");
+}
+
+export interface ListRowsInput {
+  store: string;
+  filter?: ProjectionInput["filter"];
+  limit?: number | undefined;
+}
+
+/**
+ * Returns the live rows of a Data Store that pass the filter, newest first, at most `limit` (100 by
+ * default), and `truncated` is true if more rows pass. Throws `StorageError` `not_found` for an
+ * unknown Data Store, `archived` for an Archived one, and `invalid` for a bad filter.
+ */
+export function listRows(
+  db: Database,
+  input: ListRowsInput,
+  now: string,
+): { rows: Omit<Row, "archivedAt">[]; truncated: boolean } {
+  const store = findStore(db, input.store);
+  assertStoreLive(store);
+  const issues: Issue[] = [];
+  const { filter, limit } = input;
+  const projection = resolveReadableProjection(db, { from: store.id, filter, limit }, [], issues);
+  if (!projection) throw new StorageError("invalid", "The filter is invalid", { issues });
+  const params: SQLInputValue[] = [];
+  const where = whereSql(projection, now, params);
+  const records = db.all(
+    RowRecord,
+    `SELECT t0.* FROM ${tableOf(store)} AS t0 WHERE ${where} ORDER BY t0.id DESC LIMIT ?`,
+    ...params,
+    projection.limit + 1,
+  );
+  const rows = records.slice(0, projection.limit).map((record) => {
+    const { archivedAt: _, ...row } = toRow(store, record);
+    return row;
+  });
+  return { rows, truncated: records.length > projection.limit };
 }
